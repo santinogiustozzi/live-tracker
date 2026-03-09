@@ -1,0 +1,1416 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="Live Tracker"/>
+  <meta name="theme-color" content="#020817"/>
+  <title>Live Tracker</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #020817; font-family: 'DM Sans','Segoe UI',sans-serif; -webkit-tap-highlight-color: transparent; }
+    input, button, select { font-family: inherit; }
+    #root { min-height: 100vh; }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js" crossorigin></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js" crossorigin></script>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800;900&amp;display=swap" rel="stylesheet"/>
+</head>
+<body>
+  <div id="root">
+    <div id="loading" style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#020817;color:#94a3b8;font-family:sans-serif;gap:16px">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="#00C896" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="#00C896"/></svg>
+      <div style="font-size:14px">Cargando Live Tracker...</div>
+    </div>
+  </div>
+  <script>
+    window.onerror = function(msg, src, line, col, err) {
+      document.getElementById('root').innerHTML = '<div style="padding:24px;color:#ef4444;font-family:sans-serif;background:#020817;min-height:100vh"><b>Error:</b><br>' + msg + '<br>Línea: ' + line + '</div>';
+    };
+  </script>
+  <script type="text/babel">
+const { useState, useEffect, useCallback, createContext, useContext } = React;
+
+const STORAGE_KEY  = "hockey_stats_v2";
+const SETTINGS_KEY = "hockey_settings_v2";
+const SHEETS_URL_KEY = "hockey_sheets_url";
+const QUARTER_SECONDS = 900;
+const PERIODS = ["1er Cuarto","2do Cuarto","3er Cuarto","4to Cuarto"];
+
+const EVENT_TYPES = [
+  { id:"ingreso_area",     label:"Ingreso al Area", color:"#3B9EFF" },
+  { id:"tiro_arco",        label:"Tiro al Arco",    color:"#A78BFA" },
+  { id:"corner",           label:"Corner Corto",    color:"#FBBF24" },
+  { id:"gol",              label:"Gol",             color:"#00C896" },
+  { id:"penal",            label:"Penal",           color:"#F97316" },
+  { id:"tarjeta_verde",    label:"T. Verde",        color:"#22C55E" },
+  { id:"tarjeta_amarilla", label:"T. Amarilla",     color:"#EAB308" },
+  { id:"tarjeta_roja",     label:"T. Roja",         color:"#EF4444" },
+];
+const GOL_TYPES     = [{id:"jugada",label:"Jugada"},{id:"corner",label:"Corner"},{id:"penal",label:"Penal"}];
+const SHOT_TYPES    = [{id:"jugada",label:"Directo"},{id:"corner",label:"Corner"},{id:"rebote",label:"Rebote"},{id:"desvio",label:"Desvio"}];
+const INGRESS_TYPES = [{id:"centro",label:"Centro"},{id:"combinacion",label:"Combinacion"},{id:"desborde",label:"Desborde"},{id:"individual",label:"Individual"}];
+
+const CLUB_COLORS = [
+  {id:"red",hex:"#C0392B"},{id:"blue",hex:"#2471A3"},{id:"navy",hex:"#1A3A5C"},
+  {id:"green",hex:"#1E8449"},{id:"yellow",hex:"#D4AC0D"},{id:"orange",hex:"#CA6F1E"},
+  {id:"purple",hex:"#6C3483"},{id:"white",hex:"#D5D8DC"},{id:"black",hex:"#2C3E50"},{id:"gold",hex:"#B7950B"},
+];
+
+const PALETTES = {
+  azul:   {id:"azul",  label:"Azul",  bg:"#020817",card:"#0F172A",cardAlt:"#080F1A",border:"#1E293B",borderSt:"#334155",hover:"#1A2744",muted:"#64748B",mutedLo:"#475569",mutedHi:"#94A3B8",text:"#E2E8F0",textSub:"#CBD5E1",tab:"#0A1628"},
+  negro:  {id:"negro", label:"Negro", bg:"#000000",card:"#111111",cardAlt:"#0A0A0A",border:"#222222",borderSt:"#333333",hover:"#1A1A1A",muted:"#555555",mutedLo:"#444444",mutedHi:"#888888",text:"#F0F0F0",textSub:"#CCCCCC",tab:"#0D0D0D"},
+  verde:  {id:"verde", label:"Verde", bg:"#020D06",card:"#071A0E",cardAlt:"#041009",border:"#0F3018",borderSt:"#1A4D28",hover:"#0D2E18",muted:"#3D6B4A",mutedLo:"#2D5238",mutedHi:"#6B9E7A",text:"#E2F0E8",textSub:"#C5DFD0",tab:"#051408"},
+  bordo:  {id:"bordo", label:"Bordo", bg:"#0D0205",card:"#1A0508",cardAlt:"#12030A",border:"#380A12",borderSt:"#5A1020",hover:"#2E0810",muted:"#7A2E3A",mutedLo:"#5C2030",mutedHi:"#B05060",text:"#F0E2E5",textSub:"#DFC8CC",tab:"#100408"},
+  carbon: {id:"carbon",label:"Carbon",bg:"#0A0A0C",card:"#15151A",cardAlt:"#0E0E12",border:"#252530",borderSt:"#38383F",hover:"#1E1E26",muted:"#55556A",mutedLo:"#44445A",mutedHi:"#888899",text:"#E8E8F0",textSub:"#CACADC",tab:"#111118"},
+};
+
+const ACCENTS = [
+  {id:"teal",  label:"Verde agua",hex:"#00C896"},
+  {id:"blue",  label:"Azul",      hex:"#3B9EFF"},
+  {id:"purple",label:"Violeta",   hex:"#A78BFA"},
+  {id:"orange",label:"Naranja",   hex:"#F97316"},
+  {id:"pink",  label:"Rosa",      hex:"#F472B6"},
+  {id:"yellow",label:"Amarillo",  hex:"#FBBF24"},
+];
+
+const FONT_SCALES = {small:1, medium:1.12, large:1.25};
+const DEFAULT_SETTINGS = {palette:"azul",accent:"teal",fontScale:"small",iconStyle:"svg"};
+
+const ThemeCtx = React.createContext(null);
+const useTheme = () => React.useContext(ThemeCtx);
+
+function generateId() { return Math.random().toString(36).slice(2,9); }
+
+function loadDataSync() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return {clubs:[],matches:[]};
+    const d = JSON.parse(raw);
+    if (d.teams && !d.clubs) {
+      return {clubs:[{id:"club_default",name:"Mi Club",color1:"blue",color2:"white",teams:d.teams}],matches:(d.matches||[]).map(m=>({...m,clubId:"club_default"}))};
+    }
+    const clubs = (d.clubs||[]).map(c=>({...c, teams:(c.teams||[]).map(t=>({...t, tournaments:t.tournaments||[]}))}));
+    return {clubs, matches:d.matches||[]};
+  } catch(e) { return {clubs:[],matches:[]}; }
+}
+async function loadDataAsync() { return loadDataSync(); }
+function saveData(d) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)); } catch(e) {} }
+
+function loadSettingsSync() {
+  try { const raw = localStorage.getItem(SETTINGS_KEY); return raw ? JSON.parse(raw) : null; } catch(e) { return null; }
+}
+async function loadSettingsAsync() { return loadSettingsSync(); }
+function saveSettings(s) { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch(e) {} }
+function getTeamTournaments(data, clubId, teamId) {
+  const club = (data.clubs||[]).find(c=>c.id===clubId);
+  const team = (club?.teams||[]).find(t=>t.id===teamId);
+  return team?.tournaments||[];
+}
+function loadSheetsUrl() { try { return localStorage.getItem(SHEETS_URL_KEY)||""; } catch(e) { return ""; } }
+function saveSheetsUrl(url) { try { localStorage.setItem(SHEETS_URL_KEY, url); } catch(e) {} }
+
+function SvgIcon({id, size, color}) {
+  const s = size || 22;
+  const c = color || "currentColor";
+  if (id==="ingreso_area") return <svg width={s} height={s} viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke={c} strokeWidth="1.8"/><path d="M8 12h8M14 9l3 3-3 3" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+  if (id==="tiro_arco") return <svg width={s} height={s} viewBox="0 0 24 24" fill="none"><path d="M5 19L19 5M19 5h-6M19 5v6" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/><circle cx="6" cy="18" r="2" fill={c}/></svg>;
+  if (id==="corner") return <svg width={s} height={s} viewBox="0 0 24 24" fill="none"><path d="M5 19V5h14" stroke={c} strokeWidth="1.8" strokeLinecap="round"/><rect x="3" y="3" width="3" height="8" rx="1" fill={c}/></svg>;
+  if (id==="gol") return <svg width={s} height={s} viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke={c} strokeWidth="1.8"/><circle cx="12" cy="12" r="3" fill={c}/></svg>;
+  if (id==="penal") return <svg width={s} height={s} viewBox="0 0 24 24" fill="none"><rect x="3" y="6" width="18" height="13" rx="1.5" stroke={c} strokeWidth="1.8"/><path d="M3 10h18" stroke={c} strokeWidth="1.4"/><circle cx="12" cy="15" r="2.5" stroke={c} strokeWidth="1.6"/></svg>;
+  if (id==="tarjeta_verde"||id==="tarjeta_amarilla"||id==="tarjeta_roja") return <svg width={s} height={s} viewBox="0 0 24 24" fill="none"><rect x="6" y="3" width="12" height="18" rx="2" fill={c}/></svg>;
+  if (id==="jugada") return <svg width={s} height={s} viewBox="0 0 24 24" fill="none"><path d="M13 3L5 13h7l-1 8 8-10h-7z" stroke={c} strokeWidth="1.8" strokeLinejoin="round"/></svg>;
+  if (id==="rebote") return <svg width={s} height={s} viewBox="0 0 24 24" fill="none"><path d="M4 8h16M4 8l4-4M4 8l4 4M20 16H4M20 16l-4-4M20 16l-4 4" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+  if (id==="desvio") return <svg width={s} height={s} viewBox="0 0 24 24" fill="none"><path d="M14 5l6 7-6 7M20 12H4" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+  if (id==="centro") return <svg width={s} height={s} viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke={c} strokeWidth="1.8" strokeLinecap="round"/></svg>;
+  if (id==="combinacion") return <svg width={s} height={s} viewBox="0 0 24 24" fill="none"><circle cx="5" cy="12" r="2" fill={c}/><circle cx="19" cy="12" r="2" fill={c}/><circle cx="12" cy="5" r="2" fill={c}/><path d="M7 12h10M12 7v10" stroke={c} strokeWidth="1.6" strokeLinecap="round"/></svg>;
+  if (id==="desborde") return <svg width={s} height={s} viewBox="0 0 24 24" fill="none"><path d="M5 19l7-7 7 7M5 5l7 7" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+  if (id==="individual") return <svg width={s} height={s} viewBox="0 0 24 24" fill="none"><circle cx="12" cy="7" r="3.5" stroke={c} strokeWidth="1.8"/><path d="M5 20c0-4 3-6 7-6s7 2 7 6" stroke={c} strokeWidth="1.8" strokeLinecap="round"/></svg>;
+  if (id==="new_match") return <svg width={s} height={s} viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke={c} strokeWidth="1.8"/><path d="M12 8v8M8 12h8" stroke={c} strokeWidth="2" strokeLinecap="round"/></svg>;
+  if (id==="history") return <svg width={s} height={s} viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="3" stroke={c} strokeWidth="1.8"/><path d="M7 8h10M7 12h7M7 16h4" stroke={c} strokeWidth="1.6" strokeLinecap="round"/></svg>;
+  if (id==="stats") return <svg width={s} height={s} viewBox="0 0 24 24" fill="none"><path d="M4 20V14M9 20V10M14 20V6M19 20V3" stroke={c} strokeWidth="2" strokeLinecap="round"/></svg>;
+  if (id==="team") return <svg width={s} height={s} viewBox="0 0 24 24" fill="none"><circle cx="8" cy="8" r="3" stroke={c} strokeWidth="1.8"/><circle cx="16" cy="8" r="3" stroke={c} strokeWidth="1.8"/><path d="M2 20c0-3.3 2.7-5 6-5s6 1.7 6 5" stroke={c} strokeWidth="1.8" strokeLinecap="round"/><path d="M16 15c2 0 6 .8 6 5" stroke={c} strokeWidth="1.8" strokeLinecap="round"/></svg>;
+  if (id==="settings") return <svg width={s} height={s} viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke={c} strokeWidth="1.8"/><path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" stroke={c} strokeWidth="1.6" strokeLinecap="round"/></svg>;
+  return <svg width={s} height={s} viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill={c} opacity="0.5"/></svg>;
+}
+
+function EventIcon({id, size, color}) {
+  const {iconStyle, fs} = useTheme();
+  const s = size || Math.round(18*fs);
+  const EMOJIS = {ingreso_area:"",tiro_arco:"",corner:"",gol:"",penal:"",tarjeta_verde:"",tarjeta_amarilla:"",tarjeta_roja:"",jugada:"",rebote:"",desvio:"",centro:"",combinacion:"",desborde:"",individual:"",new_match:"",history:"",stats:"",team:""};
+  if (iconStyle === "emoji") return <span style={{fontSize:s*0.9,lineHeight:1}}>{EMOJIS[id]||"*"}</span>;
+  return <SvgIcon id={id} size={s} color={color}/>;
+}
+
+function ClubShield({color1, color2, size}) {
+  const h = size||40; const w = (size||40)*0.85;
+  return (
+    <svg width={w} height={h} viewBox="0 0 85 100">
+      <defs><clipPath id="shc"><path d="M42.5 2 L80 18 L80 55 Q80 85 42.5 98 Q5 85 5 55 L5 18 Z"/></clipPath></defs>
+      <path d="M42.5 2 L80 18 L80 55 Q80 85 42.5 98 Q5 85 5 55 L5 18 Z" fill={color1} stroke="#00000030" strokeWidth="2"/>
+      <rect x="42.5" y="0" width="42.5" height="100" fill={color2} clipPath="url(#shc)"/>
+      <path d="M42.5 2 L80 18 L80 55 Q80 85 42.5 98 Q5 85 5 55 L5 18 Z" fill="none" stroke="#00000040" strokeWidth="2"/>
+    </svg>
+  );
+}
+
+function SettingsPanel({settings, onSave, onClose}) {
+  const [palette,   setPalette]   = useState(settings.palette);
+  const [accent,    setAccent]    = useState(settings.accent);
+  const [fontScale, setFontScale] = useState(settings.fontScale);
+  const [iconStyle, setIconStyle] = useState(settings.iconStyle);
+  const p  = PALETTES[palette] || PALETTES.azul;
+  const ac = ACCENTS.find(a=>a.id===accent)?.hex || "#00C896";
+  const fs = FONT_SCALES[fontScale] || 1;
+  const sz = n => Math.round(n*fs);
+  const apply = () => { onSave({palette,accent,fontScale,iconStyle}); onClose(); };
+  return (
+    <div onClick={onClose} style={{position:"fixed",inset:0,zIndex:1000,display:"flex",alignItems:"flex-end",justifyContent:"center",background:"rgba(0,0,0,0.6)"}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:p.card,border:"1px solid "+p.border,borderRadius:"20px 20px 0 0",padding:24,width:"100%",maxWidth:600,maxHeight:"85vh",overflowY:"auto"}}>
+        <div style={{width:40,height:4,borderRadius:2,background:p.borderSt,margin:"0 auto 20px"}}/>
+        <div style={{fontWeight:800,fontSize:sz(18),color:p.text,marginBottom:20}}>Ajustes</div>
+
+        <div style={{marginBottom:20}}>
+          <div style={{color:p.mutedHi,fontSize:sz(11),fontWeight:700,letterSpacing:1,marginBottom:10}}>PALETA BASE</div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            {Object.values(PALETTES).map(pal=>(
+              <button key={pal.id} onClick={()=>setPalette(pal.id)} style={{background:pal.card,border:"2px solid "+(palette===pal.id?ac:pal.border),borderRadius:10,padding:"10px 14px",cursor:"pointer",display:"flex",alignItems:"center",gap:8}}>
+                <div style={{display:"flex",gap:3}}><div style={{width:10,height:20,borderRadius:"3px 0 0 3px",background:pal.hover}}/><div style={{width:10,height:20,borderRadius:"0 3px 3px 0",background:pal.mutedHi}}/></div>
+                <span style={{color:pal.text,fontSize:sz(12),fontWeight:600}}>{pal.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div style={{marginBottom:20}}>
+          <div style={{color:p.mutedHi,fontSize:sz(11),fontWeight:700,letterSpacing:1,marginBottom:10}}>COLOR DE ACENTO</div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            {ACCENTS.map(a=>(
+              <button key={a.id} onClick={()=>setAccent(a.id)} style={{background:a.hex+"22",border:"2px solid "+(accent===a.id?a.hex:p.border),borderRadius:10,padding:"8px 14px",cursor:"pointer",display:"flex",alignItems:"center",gap:6}}>
+                <div style={{width:12,height:12,borderRadius:"50%",background:a.hex}}/>
+                <span style={{color:accent===a.id?a.hex:p.mutedHi,fontSize:sz(12),fontWeight:600}}>{a.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div style={{marginBottom:20}}>
+          <div style={{color:p.mutedHi,fontSize:sz(11),fontWeight:700,letterSpacing:1,marginBottom:10}}>TAMANO DE TEXTO</div>
+          <div style={{display:"flex",gap:8}}>
+            {[["small","Chica"],["medium","Mediana"],["large","Grande"]].map(([fid,lbl])=>(
+              <button key={fid} onClick={()=>setFontScale(fid)} style={{flex:1,background:fontScale===fid?ac+"22":p.cardAlt,border:"2px solid "+(fontScale===fid?ac:p.border),borderRadius:10,padding:"10px 8px",cursor:"pointer",color:fontScale===fid?ac:p.mutedHi,fontWeight:700,fontSize:sz(13)}}>{lbl}</button>
+            ))}
+          </div>
+        </div>
+
+        <div style={{marginBottom:24}}>
+          <div style={{color:p.mutedHi,fontSize:sz(11),fontWeight:700,letterSpacing:1,marginBottom:10}}>ESTILO DE ICONOS</div>
+          <div style={{display:"flex",gap:8}}>
+            {[["svg","SVG"],["emoji","Emoji"]].map(([iid,lbl])=>(
+              <button key={iid} onClick={()=>setIconStyle(iid)} style={{flex:1,background:iconStyle===iid?ac+"22":p.cardAlt,border:"2px solid "+(iconStyle===iid?ac:p.border),borderRadius:10,padding:"12px 8px",cursor:"pointer",color:iconStyle===iid?ac:p.mutedHi,fontWeight:700,fontSize:sz(13)}}>{lbl}</button>
+            ))}
+          </div>
+        </div>
+
+        <div style={{display:"flex",gap:8}}>
+          <button onClick={onClose} style={{flex:1,background:p.cardAlt,border:"1px solid "+p.border,borderRadius:12,padding:13,color:p.mutedHi,fontWeight:700,fontSize:sz(14),cursor:"pointer"}}>Cancelar</button>
+          <button onClick={apply}   style={{flex:2,background:ac,border:"none",borderRadius:12,padding:13,color:"#fff",fontWeight:800,fontSize:sz(14),cursor:"pointer"}}>Aplicar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SettingsBtn({onClick}) {
+  const {p, fs} = useTheme();
+  const s = Math.round(36*fs);
+  return (
+    <button onClick={onClick} style={{background:p.card,border:"1px solid "+p.border,borderRadius:10,width:s,height:s,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <SvgIcon id="settings" size={Math.round(18*fs)} color={p.mutedHi}/>
+    </button>
+  );
+}
+
+function Header({title, onBack}) {
+  const {p, fs} = useTheme();
+  const sz = n => Math.round(n*fs);
+  return (
+    <div style={{display:"flex",alignItems:"center",gap:sz(12),marginBottom:sz(28)}}>
+      <button onClick={onBack} style={{background:p.border,border:"none",color:p.mutedHi,borderRadius:sz(8),width:sz(36),height:sz(36),cursor:"pointer",fontSize:sz(18),display:"flex",alignItems:"center",justifyContent:"center"}}>&#8249;</button>
+      <h2 style={{color:p.text,fontWeight:800,fontSize:sz(22),margin:0}}>{title}</h2>
+    </div>
+  );
+}
+
+function StatCard({value, label, color, sub}) {
+  const {p, fs} = useTheme();
+  const sz = n => Math.round(n*fs);
+  return (
+    <div style={{background:p.card,border:"1px solid "+p.border,borderRadius:sz(12),padding:""+sz(14)+"px "+sz(12)+"px",textAlign:"center"}}>
+      <div style={{fontWeight:900,fontSize:sz(28),color,lineHeight:1}}>{value}</div>
+      <div style={{color:p.mutedHi,fontSize:sz(12),marginTop:sz(4),fontWeight:600}}>{label}</div>
+      {sub && <div style={{color:p.mutedLo,fontSize:sz(13),marginTop:sz(3),fontWeight:500}}>{sub}</div>}
+    </div>
+  );
+}
+
+function RelBar({left, right, leftColor, rightColor}) {
+  const {p, fs} = useTheme();
+  const sz = n => Math.round(n*fs);
+  const total = left+right;
+  if (total===0) return null;
+  const lp = Math.round((left/total)*100);
+  return (
+    <div style={{background:p.tab,borderRadius:sz(8),padding:""+sz(10)+"px "+sz(14)+"px",display:"flex",alignItems:"center",gap:sz(10)}}>
+      <span style={{color:leftColor,fontWeight:700,fontSize:sz(13),minWidth:sz(28),textAlign:"right"}}>{lp}%</span>
+      <div style={{flex:1,height:sz(8),borderRadius:sz(4),background:rightColor+"40",overflow:"hidden"}}>
+        <div style={{width:lp+"%",height:"100%",background:leftColor,borderRadius:sz(4)}}/>
+      </div>
+      <span style={{color:rightColor,fontWeight:700,fontSize:sz(13),minWidth:sz(28)}}>{100-lp}%</span>
+    </div>
+  );
+}
+
+function ColorPicker({label, selected, onChange}) {
+  const {p, fs} = useTheme();
+  const sz = n => Math.round(n*fs);
+  return (
+    <div>
+      <div style={{color:p.mutedHi,fontSize:sz(11),fontWeight:600,marginBottom:sz(8)}}>{label}</div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+        {CLUB_COLORS.map(c=>(
+          <button key={c.id} onClick={()=>onChange(c.id)} style={{width:sz(26),height:sz(26),borderRadius:6,background:c.hex,border:"2px solid "+(selected===c.id?p.text:"transparent"),cursor:"pointer",flexShrink:0}}/>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ActionCard({svgId, title, subtitle, color, onClick}) {
+  const {p, fs} = useTheme();
+  const sz = n => Math.round(n*fs);
+  return (
+    <button onClick={onClick} style={{background:p.card,border:"1px solid "+p.border,borderRadius:sz(16),padding:""+sz(18)+"px "+sz(22)+"px",display:"flex",alignItems:"center",gap:sz(16),cursor:"pointer",textAlign:"left",width:"100%",transition:"border-color 0.2s"}}>
+      <div style={{width:sz(48),height:sz(48),borderRadius:sz(12),background:color+"22",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,border:"1px solid "+color+"44"}}>
+        <EventIcon id={svgId} size={sz(24)} color={color}/>
+      </div>
+      <div style={{flex:1}}>
+        <div style={{fontWeight:700,color:p.text,fontSize:sz(16)}}>{title}</div>
+        <div style={{color:p.muted,fontSize:sz(13),marginTop:sz(2)}}>{subtitle}</div>
+      </div>
+      <span style={{color:p.borderSt,fontSize:sz(20)}}>&#8250;</span>
+    </button>
+  );
+}
+
+function HomeView({data, onUpdateData, onSelectContext, onOpenSettings, onOpenBackup}) {
+  const {p, ac, fs} = useTheme();
+  const sz = n => Math.round(n*fs);
+  const [expanded,  setExpanded]  = useState(null);
+  const [showForm,  setShowForm]  = useState(false);
+  const [editId,    setEditId]    = useState(null);
+  const [clubName,  setClubName]  = useState("");
+  const [color1,    setColor1]    = useState("blue");
+  const [color2,    setColor2]    = useState("white");
+
+  const getHex = id => CLUB_COLORS.find(c=>c.id===id)?.hex || "#2471A3";
+  const resetForm = () => { setShowForm(false); setEditId(null); setClubName(""); setColor1("blue"); setColor2("white"); };
+  const startEdit = club => { setEditId(club.id); setClubName(club.name); setColor1(club.color1||"blue"); setColor2(club.color2||"white"); setShowForm(true); };
+
+  const saveClub = () => {
+    if (!clubName.trim()) return;
+    if (editId) {
+      onUpdateData({...data, clubs:data.clubs.map(c=>c.id===editId?{...c,name:clubName.trim(),color1,color2}:c)});
+    } else {
+      const nc = {id:generateId(),name:clubName.trim(),color1,color2,teams:[]};
+      onUpdateData({...data, clubs:[...data.clubs,nc]});
+      setExpanded(nc.id);
+    }
+    resetForm();
+  };
+  const deleteClub = id => onUpdateData({...data, clubs:data.clubs.filter(c=>c.id!==id), matches:data.matches.filter(m=>m.clubId!==id)});
+
+  return (
+    <div style={{padding:sz(24),maxWidth:600,margin:"0 auto"}}>
+      <div style={{position:"relative",marginBottom:sz(32)}}>
+        <div style={{textAlign:"center",paddingTop:sz(8)}}>
+          <SvgIcon id="gol" size={sz(44)} color={ac}/>
+          <h1 style={{fontSize:sz(30),fontWeight:800,color:p.text,margin:""+sz(8)+"px 0 "+sz(4)+"px",letterSpacing:"-0.5px"}}>Live Tracker</h1>
+          <p style={{color:p.muted,fontSize:sz(13),margin:"0 0 "+sz(20)+"px",fontWeight:500}}>Estad&iacute;sticas en vivo para hockey sobre c&eacute;sped</p>
+          <div style={{display:"inline-block",background:p.tab,border:"1px solid "+p.border,borderRadius:sz(20),padding:""+sz(6)+"px "+sz(14)+"px"}}>
+            <span style={{color:p.mutedLo,fontSize:sz(12),fontWeight:600}}>Selecciona tu club para comenzar</span>
+          </div>
+        </div>
+        <div style={{position:"absolute",right:0,top:0,display:"flex",gap:8}}>
+          <button onClick={onOpenBackup} style={{background:p.card,border:"1px solid "+p.border,borderRadius:10,width:Math.round(36*fs),height:Math.round(36*fs),cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <svg width={Math.round(18*fs)} height={Math.round(18*fs)} viewBox="0 0 24 24" fill="none"><path d="M12 3v12M8 11l4 4 4-4M3 17v2a2 2 0 002 2h14a2 2 0 002-2v-2" stroke={p.mutedHi} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          </button>
+          <SettingsBtn onClick={onOpenSettings}/>
+        </div>
+      </div>
+
+      <div style={{display:"flex",flexDirection:"column",gap:sz(10),marginBottom:sz(16)}}>
+        {data.clubs.length===0 && !showForm && (
+          <p style={{color:p.mutedLo,textAlign:"center",padding:""+sz(28)+"px 0",fontSize:sz(14)}}>No hay clubes. Crea el primero.</p>
+        )}
+        {data.clubs.map(club=>{
+          const h1=getHex(club.color1||"blue"), h2=getHex(club.color2||"white");
+          const isOpen = expanded===club.id;
+          return (
+            <div key={club.id} style={{borderRadius:sz(14),overflow:"hidden",border:"1px solid "+p.border}}>
+              <div style={{background:isOpen?p.hover:p.card,display:"flex",alignItems:"center"}}>
+                <button onClick={()=>setExpanded(isOpen?null:club.id)} style={{flex:1,background:"none",border:"none",padding:""+sz(14)+"px "+sz(16)+"px",display:"flex",alignItems:"center",gap:sz(14),cursor:"pointer",textAlign:"left"}}>
+                  <ClubShield color1={h1} color2={h2} size={sz(38)}/>
+                  <div style={{flex:1}}>
+                    <div style={{fontWeight:700,color:p.text,fontSize:sz(15)}}>{club.name}</div>
+                    <div style={{color:p.muted,fontSize:sz(12)}}>{club.teams.length} equipo{club.teams.length!==1?"s":""}</div>
+                  </div>
+                  <span style={{color:p.mutedLo,fontSize:sz(14)}}>&#9654;</span>
+                </button>
+                <div style={{display:"flex",gap:sz(4),paddingRight:sz(12)}}>
+                  <button onClick={()=>startEdit(club)} style={{background:p.border,border:"none",color:p.mutedHi,borderRadius:sz(8),width:sz(34),height:sz(34),cursor:"pointer",fontSize:sz(15),display:"flex",alignItems:"center",justifyContent:"center"}}>&#9998;</button>
+                  <button onClick={()=>deleteClub(club.id)} style={{background:"#EF444420",border:"1px solid #EF444440",color:"#EF4444",borderRadius:sz(8),width:sz(34),height:sz(34),cursor:"pointer",fontSize:sz(15),display:"flex",alignItems:"center",justifyContent:"center"}}>&#128465;</button>
+                </div>
+              </div>
+              {isOpen && (
+                <div style={{background:p.cardAlt,borderTop:"1px solid "+p.border}}>
+                  {club.teams.length===0 && <div style={{color:p.mutedLo,fontSize:sz(13),padding:""+sz(14)+"px "+sz(20)+"px"}}>Sin equipos. Agrega uno.</div>}
+                  {club.teams.map(team=>(
+                    <button key={team.id} onClick={()=>onSelectContext(club,team)} style={{width:"100%",background:"none",border:"none",borderBottom:"1px solid "+p.card,padding:""+sz(13)+"px "+sz(20)+"px "+sz(13)+"px "+sz(28)+"px",display:"flex",alignItems:"center",gap:sz(12),cursor:"pointer",textAlign:"left"}}>
+                      <div style={{width:sz(32),height:sz(32),borderRadius:sz(8),background:h1+"25",border:"1px solid "+h1+"40",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                        <EventIcon id="team" size={sz(16)} color={h1}/>
+                      </div>
+                      <div style={{flex:1}}>
+                        <div style={{fontWeight:600,color:p.textSub,fontSize:sz(14)}}>{team.name}</div>
+                        <div style={{color:p.mutedLo,fontSize:sz(11)}}>{team.players.length} jugadoras</div>
+                      </div>
+                      <span style={{color:ac,fontSize:sz(18)}}>&#8250;</span>
+                    </button>
+                  ))}
+                  <button onClick={()=>onSelectContext(club,null)} style={{width:"100%",background:"none",border:"none",padding:""+sz(11)+"px "+sz(20)+"px "+sz(11)+"px "+sz(28)+"px",display:"flex",alignItems:"center",gap:sz(8),cursor:"pointer"}}>
+                    <SvgIcon id="settings" size={sz(14)} color={p.mutedLo}/>
+                    <span style={{color:p.mutedLo,fontSize:sz(12)}}>Gestionar equipos</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {showForm ? (
+        <div style={{background:p.card,border:"1px solid "+p.border,borderRadius:sz(14),padding:sz(18),display:"flex",flexDirection:"column",gap:sz(16)}}>
+          <div style={{fontWeight:700,color:p.text,fontSize:sz(15)}}>{editId?"Editar club":"Nuevo club"}</div>
+          <div>
+            <label style={{color:p.mutedHi,fontSize:sz(11),fontWeight:600,display:"block",marginBottom:sz(6)}}>NOMBRE DEL CLUB</label>
+            <input value={clubName} onChange={e=>setClubName(e.target.value)} placeholder="Ej: Jockey Club" style={{background:p.cardAlt,border:"1px solid "+p.border,borderRadius:sz(10),color:p.text,padding:""+sz(12)+"px "+sz(14)+"px",fontSize:sz(14),outline:"none",width:"100%",boxSizing:"border-box"}}/>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:sz(12)}}>
+            <ColorPicker label="COLOR 1" selected={color1} onChange={setColor1}/>
+            <ColorPicker label="COLOR 2" selected={color2} onChange={setColor2}/>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:sz(14),background:p.cardAlt,borderRadius:sz(10),padding:""+sz(12)+"px "+sz(16)+"px"}}>
+            <ClubShield color1={getHex(color1)} color2={getHex(color2)} size={sz(44)}/>
+            <div>
+              <div style={{color:p.muted,fontSize:sz(11),fontWeight:600}}>VISTA PREVIA</div>
+              <div style={{color:p.text,fontWeight:700,fontSize:sz(15),marginTop:sz(2)}}>{clubName||"Nombre del club"}</div>
+            </div>
+          </div>
+          <div style={{display:"flex",gap:sz(8)}}>
+            <button onClick={resetForm} style={{flex:1,background:p.borderSt,border:"none",borderRadius:sz(12),padding:sz(14),color:p.text,fontWeight:700,fontSize:sz(15),cursor:"pointer"}}>Cancelar</button>
+            <button onClick={saveClub} disabled={!clubName.trim()} style={{flex:1,background:clubName.trim()?ac:"#1E293B",border:"none",borderRadius:sz(12),padding:sz(14),color:clubName.trim()?"#fff":"#475569",fontWeight:800,fontSize:sz(15),cursor:clubName.trim()?"pointer":"not-allowed"}}>Guardar</button>
+          </div>
+        </div>
+      ) : (
+        <button onClick={()=>setShowForm(true)} style={{width:"100%",background:"none",border:"1px dashed "+p.border,borderRadius:sz(12),padding:sz(14),color:p.mutedLo,fontSize:sz(14),cursor:"pointer",fontWeight:600}}>+ Agregar club</button>
+      )}
+    </div>
+  );
+}
+
+function ClubTeamView({data, onUpdateData, club, team, onBack, onNavigate, onOpenSettings}) {
+  const {p, ac, fs} = useTheme();
+  const sz = n => Math.round(n*fs);
+  const [showForm,      setShowForm]      = useState(false);
+  const [teamName,      setTeamName]      = useState("");
+  const [players,       setPlayers]       = useState([{id:generateId(),name:"",number:""}]);
+  const [editTeam,      setEditTeam]      = useState(null);
+  const [managingTeam,  setManagingTeam]  = useState(null); // teamId for tournament mgmt
+  const [newTournament, setNewTournament] = useState("");
+
+  const addPlayer    = () => setPlayers(ps=>[...ps,{id:generateId(),name:"",number:""}]);
+  const removePlayer = id => setPlayers(ps=>ps.filter(pl=>pl.id!==id));
+  const updatePlayer = (id,field,val) => setPlayers(ps=>ps.map(pl=>pl.id===id?{...pl,[field]:val}:pl));
+
+  const saveTeam = () => {
+    if (!teamName.trim()) return;
+    const vp = players.filter(pl=>pl.name.trim());
+    const ut = editTeam ? {...club.teams.find(t=>t.id===editTeam),name:teamName.trim(),players:vp} : {id:generateId(),name:teamName.trim(),players:vp};
+    const uts = editTeam ? club.teams.map(t=>t.id===editTeam?ut:t) : [...club.teams,ut];
+    onUpdateData({...data,clubs:data.clubs.map(c=>c.id===club.id?{...c,teams:uts}:c)});
+    setShowForm(false); setTeamName(""); setPlayers([{id:generateId(),name:"",number:""}]); setEditTeam(null);
+  };
+  const deleteTeam = id => onUpdateData({...data,clubs:data.clubs.map(c=>c.id===club.id?{...c,teams:c.teams.filter(t=>t.id!==id)}:c)});
+
+  const addTournament = (teamId) => {
+    if (!newTournament.trim()) return;
+    const tour = {id:generateId(), name:newTournament.trim()};
+    const clubs = data.clubs.map(c=>c.id===club.id?{...c,teams:c.teams.map(t=>t.id===teamId?{...t,tournaments:[...(t.tournaments||[]),tour]}:t)}:c);
+    onUpdateData({...data,clubs});
+    setNewTournament("");
+  };
+  const deleteTournament = (teamId, tourId) => {
+    const clubs = data.clubs.map(c=>c.id===club.id?{...c,teams:c.teams.map(t=>t.id===teamId?{...t,tournaments:(t.tournaments||[]).filter(tr=>tr.id!==tourId)}:t)}:c);
+    onUpdateData({...data,clubs});
+  };  const startEdit  = t  => { setEditTeam(t.id); setTeamName(t.name); setPlayers(t.players.length?t.players.map(p=>({...p})):[{id:generateId(),name:"",number:""}]); setShowForm(true); };
+
+  if (!team) {
+    return (
+      <div style={{padding:sz(24),maxWidth:600,margin:"0 auto"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:sz(28)}}>
+          <div style={{display:"flex",alignItems:"center",gap:sz(12)}}>
+            <button onClick={onBack} style={{background:p.border,border:"none",color:p.mutedHi,borderRadius:sz(8),width:sz(36),height:sz(36),cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>&#8249;</button>
+            <h2 style={{color:p.text,fontWeight:800,fontSize:sz(20),margin:0}}>Equipos - {club.name}</h2>
+          </div>
+          <SettingsBtn onClick={onOpenSettings}/>
+        </div>
+        {!showForm ? (
+          <>
+            <div style={{display:"flex",flexDirection:"column",gap:sz(10),marginBottom:sz(16)}}>
+              {club.teams.length===0 && <p style={{color:p.muted,textAlign:"center",padding:""+sz(28)+"px 0"}}>Sin equipos registrados.</p>}
+              {club.teams.map(t=>(
+                <div key={t.id} style={{background:p.card,border:"1px solid "+p.border,borderRadius:sz(12),padding:""+sz(14)+"px "+sz(18)+"px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                  <div>
+                    <div style={{fontWeight:700,color:p.text,fontSize:sz(14)}}>{t.name}</div>
+                    <div style={{color:p.muted,fontSize:sz(12)}}>{t.players.length} jugadoras</div>
+                  </div>
+                  <div style={{display:"flex",gap:sz(6)}}>
+                    <button onClick={()=>setManagingTeam(managingTeam===t.id?null:t.id)} style={{background:"#A78BFA22",border:"1px solid #A78BFA44",color:"#A78BFA",borderRadius:sz(8),padding:"0 "+sz(8)+"px",height:sz(34),cursor:"pointer",fontSize:sz(11),fontWeight:700}}>Torneos</button>
+                    <button onClick={()=>startEdit(t)} style={{background:p.border,border:"none",color:p.mutedHi,borderRadius:sz(8),width:sz(34),height:sz(34),cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>&#9998;</button>
+                    <button onClick={()=>deleteTeam(t.id)} style={{background:"#EF444420",border:"1px solid #EF444440",color:"#EF4444",borderRadius:sz(8),width:sz(34),height:sz(34),cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>&#128465;</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {managingTeam && (()=>{
+              const t = club.teams.find(t=>t.id===managingTeam);
+              if (!t) return null;
+              return (
+                <div style={{background:p.card,border:"1px solid #A78BFA44",borderRadius:sz(12),padding:sz(14),marginBottom:sz(12)}}>
+                  <div style={{color:"#A78BFA",fontWeight:700,fontSize:sz(13),marginBottom:sz(10)}}>TORNEOS — {t.name}</div>
+                  {(t.tournaments||[]).length===0 && <div style={{color:p.mutedLo,fontSize:sz(12),marginBottom:sz(10)}}>Sin torneos. Agregá uno abajo.</div>}
+                  <div style={{display:"flex",flexDirection:"column",gap:sz(6),marginBottom:sz(10)}}>
+                    {(t.tournaments||[]).map(tr=>(
+                      <div key={tr.id} style={{display:"flex",alignItems:"center",gap:sz(8),background:p.cardAlt,borderRadius:sz(8),padding:""+sz(8)+"px "+sz(10)+"px"}}>
+                        <span style={{flex:1,color:p.text,fontSize:sz(13)}}>{tr.name}</span>
+                        <button onClick={()=>deleteTournament(t.id,tr.id)} style={{background:"none",border:"none",color:"#EF4444",cursor:"pointer",fontSize:sz(14)}}>&#215;</button>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{display:"flex",gap:sz(8)}}>
+                    <input value={newTournament} onChange={e=>setNewTournament(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addTournament(t.id)} placeholder="Nombre del torneo..." style={{flex:1,background:p.cardAlt,border:"1px solid "+p.border,borderRadius:sz(8),color:p.text,padding:sz(8),fontSize:sz(13),outline:"none"}}/>
+                    <button onClick={()=>addTournament(t.id)} style={{background:"#A78BFA",border:"none",borderRadius:sz(8),color:"#fff",fontWeight:700,padding:"0 "+sz(12)+"px",cursor:"pointer",fontSize:sz(13)}}>+</button>
+                  </div>
+                </div>
+              );
+            })()}
+                        style={{width:"100%",background:ac,border:"none",borderRadius:sz(12),padding:sz(14),color:"#fff",fontWeight:800,fontSize:sz(15),cursor:"pointer"}}>+ Nuevo Equipo</button>
+          </>
+        ) : (
+          <div style={{display:"flex",flexDirection:"column",gap:sz(16)}}>
+            <div>
+              <label style={{color:p.mutedHi,fontSize:sz(13),fontWeight:600,display:"block",marginBottom:sz(6)}}>NOMBRE DEL EQUIPO</label>
+              <input value={teamName} onChange={e=>setTeamName(e.target.value)} placeholder="Ej: Primera Division" style={{background:p.card,border:"1px solid "+p.border,borderRadius:sz(10),color:p.text,padding:""+sz(12)+"px "+sz(14)+"px",fontSize:sz(14),outline:"none",width:"100%",boxSizing:"border-box"}}/>
+            </div>
+            <div>
+              <label style={{color:p.mutedHi,fontSize:sz(13),fontWeight:600,display:"block",marginBottom:sz(8)}}>JUGADORAS</label>
+              <div style={{display:"flex",flexDirection:"column",gap:sz(8)}}>
+                {players.map((pl,i)=>(
+                  <div key={pl.id} style={{display:"flex",gap:sz(8),alignItems:"center"}}>
+                    <input value={pl.number} onChange={e=>updatePlayer(pl.id,"number",e.target.value)} placeholder="#" style={{background:p.card,border:"1px solid "+p.border,borderRadius:sz(8),color:p.text,padding:sz(10),fontSize:sz(14),outline:"none",width:sz(52),textAlign:"center",flexShrink:0,boxSizing:"border-box"}}/>
+                    <input value={pl.name} onChange={e=>updatePlayer(pl.id,"name",e.target.value)} placeholder={"Jugadora "+(i+1)} style={{background:p.card,border:"1px solid "+p.border,borderRadius:sz(8),color:p.text,padding:sz(10),fontSize:sz(14),outline:"none",flex:1,boxSizing:"border-box"}}/>
+                    <button onClick={()=>removePlayer(pl.id)} style={{background:"none",border:"none",color:"#EF4444",cursor:"pointer",fontSize:sz(18),padding:"0 "+sz(4)+"px"}}>&#215;</button>
+                  </div>
+                ))}
+              </div>
+              <button onClick={addPlayer} style={{marginTop:sz(10),background:"none",border:"1px dashed "+p.borderSt,color:p.muted,borderRadius:sz(8),padding:""+sz(8)+"px "+sz(16)+"px",cursor:"pointer",fontSize:sz(13),width:"100%"}}>+ Agregar jugadora</button>
+            </div>
+            <div style={{display:"flex",gap:sz(8)}}>
+              <button onClick={()=>{setShowForm(false);setEditTeam(null);setTeamName("");setPlayers([{id:generateId(),name:"",number:""}]);}} style={{flex:1,background:p.borderSt,border:"none",borderRadius:sz(12),padding:sz(14),color:p.text,fontWeight:700,cursor:"pointer"}}>Cancelar</button>
+              <button onClick={saveTeam} style={{flex:1,background:ac,border:"none",borderRadius:sz(12),padding:sz(14),color:"#fff",fontWeight:800,cursor:"pointer"}}>Guardar</button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const teamMatches = data.matches.filter(m=>m.teamId===team.id&&m.clubId===club.id);
+  return (
+    <div style={{padding:sz(24),maxWidth:600,margin:"0 auto"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:sz(20)}}>
+        <button onClick={onBack} style={{background:"none",border:"none",color:p.muted,cursor:"pointer",fontSize:sz(13),display:"flex",alignItems:"center",gap:sz(6),padding:0}}>
+          &#8249; <span>{club.name}</span>
+        </button>
+        <SettingsBtn onClick={onOpenSettings}/>
+      </div>
+      <div style={{marginBottom:sz(28)}}>
+        <div style={{color:p.muted,fontSize:sz(12),fontWeight:600,marginBottom:sz(4)}}>{club.name}</div>
+        <h2 style={{color:p.text,fontWeight:800,fontSize:sz(24),margin:0}}>{team.name}</h2>
+        <div style={{color:p.mutedLo,fontSize:sz(12),marginTop:sz(4)}}>{team.players.length} jugadoras &middot; {teamMatches.length} partido{teamMatches.length!==1?"s":""}</div>
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:sz(12)}}>
+        <ActionCard svgId="new_match" title="Nuevo Partido"          subtitle="Registrar estadisticas en vivo"   color={ac}       onClick={()=>onNavigate("new-match")}/>
+        <ActionCard svgId="history"   title="Historial de Partidos"  subtitle={teamMatches.length+" partido"+(teamMatches.length!==1?"s":"")+" registrado"+(teamMatches.length!==1?"s":"")} color="#A78BFA" onClick={()=>onNavigate("history")}/>
+        <ActionCard svgId="stats"     title="Estadisticas Generales" subtitle="Totales, promedios y analisis"    color="#FBBF24"  onClick={()=>onNavigate("stats")}/>
+      </div>
+    </div>
+  );
+}
+
+function formatTime(s) { const m=Math.floor(s/60); return m+":"+(s%60).toString().padStart(2,"0"); }
+
+function NewMatchView({data, onUpdateData, club, team, onBack}) {
+  const {p, ac, fs} = useTheme();
+  const sz = n => Math.round(n*fs);
+  const [step,     setStep]     = useState("setup");
+  const [rivalry,  setRivalry]  = useState("");
+  const [quarter,  setQuarter]  = useState(PERIODS[0]);
+  const [running,  setRunning]  = useState(false);
+  const [timeLeft, setTimeLeft] = useState(QUARTER_SECONDS);
+  const [events,   setEvents]   = useState([]);
+  const [expanded, setExpanded] = useState(null); // {evId, phase:"side"|"sub"}
+  const [selSide,  setSelSide]  = useState(null);
+  const [matchId]               = useState(generateId);
+
+  useEffect(()=>{
+    if (!running) return;
+    const t = setInterval(()=>{
+      setTimeLeft(v=>{
+        if (v > 1) return v-1;
+        clearInterval(t);
+        setRunning(false);
+        setQuarter(q => {
+          const idx = PERIODS.indexOf(q);
+          return idx < PERIODS.length-1 ? PERIODS[idx+1] : q;
+        });
+        return QUARTER_SECONDS;
+      });
+    },1000);
+    return ()=>clearInterval(t);
+  },[running]);
+
+  const minute = Math.ceil((QUARTER_SECONDS-timeLeft)/60)||1;
+  const timerColor = timeLeft<=60?"#EF4444":timeLeft<=180?"#FBBF24":p.text;
+
+  const handleEvClick = evId => {
+    if (expanded && expanded.evId===evId) { setExpanded(null); setSelSide(null); return; }
+    setExpanded({evId, phase:"side"});
+    setSelSide(null);
+  };
+
+  const handleSide = side => {
+    const evId = expanded.evId;
+    const needsSub = ["ingreso_area","tiro_arco","gol"].includes(evId);
+    if (needsSub) {
+      setSelSide(side);
+      setExpanded({evId, phase:"sub"});
+    } else {
+      const ev = EVENT_TYPES.find(e=>e.id===evId);
+      setEvents(evs=>[{id:generateId(),type:evId,label:ev.label,side,minute,quarter},...evs]);
+      setExpanded(null); setSelSide(null);
+    }
+  };
+
+  const handleSub = subData => {
+    const ev = EVENT_TYPES.find(e=>e.id===expanded.evId);
+    setEvents(evs=>[{id:generateId(),type:expanded.evId,label:ev.label,side:selSide,minute,quarter,...subData},...evs]);
+    setExpanded(null); setSelSide(null);
+  };
+
+  const finishMatch = () => {
+    const match = {id:matchId,clubId:club.id,teamId:team.id,rival:rivalry||"Rival",date:new Date().toLocaleDateString("es-AR"),events};
+    onUpdateData({...data, matches:[match,...data.matches]});
+    onBack();
+  };
+
+  if (step==="setup") {
+    return (
+      <div style={{padding:sz(24),maxWidth:600,margin:"0 auto"}}>
+        <Header title="Nuevo Partido" onBack={onBack}/>
+        <div style={{display:"flex",flexDirection:"column",gap:sz(16)}}>
+          <div>
+            <label style={{color:p.mutedHi,fontSize:sz(13),fontWeight:600,display:"block",marginBottom:sz(6)}}>RIVAL</label>
+            <input value={rivalry} onChange={e=>setRivalry(e.target.value)} placeholder="Nombre del rival" style={{background:p.card,border:"1px solid "+p.border,borderRadius:sz(10),color:p.text,padding:""+sz(12)+"px "+sz(14)+"px",fontSize:sz(14),outline:"none",width:"100%",boxSizing:"border-box"}}/>
+          </div>
+          <div>
+            <div style={{color:p.mutedHi,fontSize:sz(13),fontWeight:600,marginBottom:sz(8)}}>CUARTO INICIAL</div>
+            <div style={{display:"flex",gap:sz(6)}}>
+              {PERIODS.map(q=>(
+                <button key={q} onClick={()=>setQuarter(q)} style={{flex:1,background:quarter===q?ac+"22":p.card,border:"1px solid "+(quarter===q?ac:p.border),borderRadius:sz(8),padding:""+sz(10)+"px "+sz(4)+"px",cursor:"pointer",color:quarter===q?ac:p.mutedLo,fontWeight:700,fontSize:sz(11)}}>C{PERIODS.indexOf(q)+1}</button>
+              ))}
+            </div>
+          </div>
+          <button onClick={()=>setStep("register")} style={{background:ac,border:"none",borderRadius:sz(12),padding:sz(14),color:"#fff",fontWeight:800,fontSize:sz(15),cursor:"pointer"}}>Iniciar Partido</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{padding:sz(16),maxWidth:600,margin:"0 auto"}}>
+
+      {/* HEADER: back + timer + play/pause */}
+      <div style={{display:"flex",alignItems:"center",gap:sz(10),marginBottom:sz(10)}}>
+        <button onClick={onBack} style={{background:p.border,border:"none",color:p.mutedHi,borderRadius:sz(8),width:sz(36),height:sz(36),cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>&#8249;</button>
+        <div style={{flex:1,textAlign:"center"}}>
+          <div style={{fontSize:sz(38),fontWeight:900,color:timerColor,fontVariantNumeric:"tabular-nums",lineHeight:1}}>{formatTime(timeLeft)}</div>
+          <div style={{color:p.muted,fontSize:sz(15),marginTop:sz(3),fontWeight:600}}>{rivalry||"vs Rival"}</div>
+        </div>
+        <button onClick={()=>setRunning(r=>!r)} style={{background:running?"#EF444433":ac+"33",border:"1px solid "+(running?"#EF444460":ac+"60"),borderRadius:sz(8),width:sz(36),height:sz(36),cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+          {running
+            ? <svg width={sz(16)} height={sz(16)} viewBox="0 0 24 24" fill="none"><rect x="5" y="4" width="4" height="16" rx="1.5" fill={"#EF4444"}/><rect x="15" y="4" width="4" height="16" rx="1.5" fill={"#EF4444"}/></svg>
+            : <svg width={sz(16)} height={sz(16)} viewBox="0 0 24 24"><polygon points="6,3 20,12 6,21" fill={ac}/></svg>
+          }
+        </button>
+      </div>
+
+      {/* QUARTERS arriba */}
+      <div style={{display:"flex",gap:sz(4),marginBottom:sz(14),background:p.tab,borderRadius:sz(10),padding:3}}>
+        {PERIODS.map(q=>(
+          <button key={q} onClick={()=>setQuarter(q)} style={{flex:1,padding:""+sz(7)+"px "+sz(4)+"px",borderRadius:sz(8),border:"none",cursor:"pointer",fontWeight:700,fontSize:sz(12),background:quarter===q?ac+"33":"transparent",color:quarter===q?ac:p.mutedLo}}>
+            C{PERIODS.indexOf(q)+1}
+          </button>
+        ))}
+      </div>
+
+      {/* EVENT LIST - desplegable inline */}
+      <div style={{display:"flex",flexDirection:"column",gap:sz(5),marginBottom:sz(14)}}>
+        {EVENT_TYPES.map(ev=>{
+          const isOpen   = expanded && expanded.evId===ev.id;
+          const phase    = isOpen ? expanded.phase : null;
+          const needsSub = ["ingreso_area","tiro_arco","gol"].includes(ev.id);
+          const subTypes = ev.id==="ingreso_area"?INGRESS_TYPES:ev.id==="gol"?GOL_TYPES:SHOT_TYPES;
+          const fk = ev.id==="ingreso_area"?"ingressType":ev.id==="gol"?"golType":"shotType";
+          const lk = ev.id==="ingreso_area"?"ingressLabel":ev.id==="gol"?"golLabel":"shotLabel";
+          return (
+            <div key={ev.id} style={{borderRadius:sz(11),overflow:"hidden",border:"1px solid "+(isOpen?ev.color+"60":p.border)}}>
+              <button onClick={()=>handleEvClick(ev.id)}
+                style={{width:"100%",background:isOpen?ev.color+"18":p.card,border:"none",padding:""+sz(11)+"px "+sz(14)+"px",display:"flex",alignItems:"center",gap:sz(12),cursor:"pointer",textAlign:"left"}}>
+                <div style={{width:sz(34),height:sz(34),borderRadius:sz(8),background:ev.color+"22",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,border:"1px solid "+ev.color+"44"}}>
+                  <SvgIcon id={ev.id} size={sz(17)} color={ev.color}/>
+                </div>
+                <span style={{flex:1,fontWeight:600,color:isOpen?ev.color:p.textSub,fontSize:sz(14)}}>{ev.label}</span>
+                <span style={{color:isOpen?ev.color:p.borderSt,fontSize:sz(17),display:"inline-block",transform:isOpen?"rotate(90deg)":"rotate(0deg)",transition:"transform 0.2s"}}>&#8250;</span>
+              </button>
+
+              {isOpen && phase==="side" && (
+                <div style={{background:p.cardAlt,borderTop:"1px solid "+ev.color+"30",padding:sz(8),display:"flex",gap:sz(8)}}>
+                  <button onClick={()=>handleSide("own")}
+                    style={{flex:1,background:ac+"22",border:"2px solid "+ac,borderRadius:sz(9),padding:""+sz(9)+"px "+sz(8)+"px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:sz(6)}}>
+                    <svg width={sz(14)} height={sz(14)} viewBox="0 0 24 24" fill="none"><path d="M5 12l5 5L20 7" stroke={ac} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                    <span style={{fontWeight:800,fontSize:sz(13),color:ac}}>A FAVOR</span>
+                  </button>
+                  <button onClick={()=>handleSide("rival")}
+                    style={{flex:1,background:"#EF444422",border:"2px solid #EF4444",borderRadius:sz(9),padding:""+sz(9)+"px "+sz(8)+"px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:sz(6)}}>
+                    <svg width={sz(14)} height={sz(14)} viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6l12 12" stroke="#EF4444" strokeWidth="2.5" strokeLinecap="round"/></svg>
+                    <span style={{fontWeight:800,fontSize:sz(13),color:"#EF4444"}}>EN CONTRA</span>
+                  </button>
+                </div>
+              )}
+
+              {isOpen && phase==="sub" && needsSub && (
+                <div style={{background:p.cardAlt,borderTop:"1px solid "+ev.color+"30",padding:sz(8)}}>
+                  <div style={{color:p.mutedLo,fontSize:sz(10),fontWeight:700,marginBottom:sz(6),paddingLeft:sz(2)}}>
+                    {ev.id==="ingreso_area"?"TIPO DE INGRESO":ev.id==="gol"?"ORIGEN DEL GOL":"ORIGEN DEL TIRO"}
+                    <span style={{marginLeft:sz(5),color:selSide==="own"?ac:"#EF4444"}}>{selSide==="own"?" / a favor":" / en contra"}</span>
+                  </div>
+                  <div style={{display:"flex",flexDirection:"column",gap:sz(5)}}>
+                    {subTypes.map(t=>(
+                      <button key={t.id} onClick={()=>handleSub({[fk]:t.id,[lk]:t.label})}
+                        style={{background:p.card,border:"1px solid "+p.border,borderRadius:sz(8),padding:""+sz(9)+"px "+sz(12)+"px",display:"flex",alignItems:"center",gap:sz(10),cursor:"pointer",width:"100%",textAlign:"left"}}>
+                        <div style={{width:sz(26),height:sz(26),borderRadius:sz(6),background:ev.color+"22",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                          <SvgIcon id={t.id} size={sz(13)} color={ev.color}/>
+                        </div>
+                        <span style={{fontWeight:600,color:p.text,fontSize:sz(13),flex:1}}>{t.label}</span>
+                        <span style={{color:p.borderSt,fontSize:sz(15)}}>&#8250;</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* EVENTOS REGISTRADOS */}
+      {events.length>0 && (
+        <div style={{marginBottom:sz(14)}}>
+          <div style={{color:p.mutedHi,fontSize:sz(11),fontWeight:700,letterSpacing:1,marginBottom:sz(7)}}>EVENTOS REGISTRADOS ({events.length})</div>
+          <div style={{display:"flex",flexDirection:"column",gap:sz(4)}}>
+            {events.slice(0,5).map(ev=>{
+              const et = EVENT_TYPES.find(e=>e.id===ev.type);
+              return (
+                <div key={ev.id} style={{background:p.card,border:"1px solid "+p.border,borderRadius:sz(8),padding:""+sz(8)+"px "+sz(12)+"px",display:"flex",alignItems:"center",gap:sz(9)}}>
+                  <div style={{width:sz(26),height:sz(26),borderRadius:sz(6),background:(et?.color||ac)+"22",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                    <SvgIcon id={ev.type} size={sz(13)} color={et?.color||ac}/>
+                  </div>
+                  <span style={{color:p.text,fontWeight:600,fontSize:sz(12),flex:1}}>{et?.label}{ev.ingressLabel?" / "+ev.ingressLabel:ev.golLabel?" / "+ev.golLabel:ev.shotLabel?" / "+ev.shotLabel:""}</span>
+                  <span style={{color:ev.side==="own"?ac:"#EF4444",fontSize:sz(10),fontWeight:700,marginRight:sz(4)}}>{ev.side==="own"?"FAV":"CON"}</span>
+                  <span style={{color:p.mutedLo,fontSize:sz(10)}}>{ev.minute}' C{PERIODS.indexOf(ev.quarter)+1}</span>
+                </div>
+              );
+            })}
+            {events.length>5 && <div style={{color:p.mutedLo,fontSize:sz(10),textAlign:"center",padding:sz(3)}}>+{events.length-5} anteriores</div>}
+          </div>
+        </div>
+      )}
+
+      <button onClick={finishMatch} style={{width:"100%",background:"#EF4444",border:"none",borderRadius:sz(12),padding:sz(13),color:"#fff",fontWeight:800,fontSize:sz(15),cursor:"pointer"}}>Finalizar Partido</button>
+    </div>
+  );
+}
+
+function HistoryView({data, club, team, onBack, onDeleteMatch, sheetsUrl, syncMatch, syncStatus, onSheetsUrlChange, onUpdateData}) {
+  const {p, ac, fs} = useTheme();
+  const sz = n => Math.round(n*fs);
+  const [openMatch,    setOpenMatch]    = useState(null);
+  const [openTimeline, setOpenTimeline] = useState({});
+  const [activeQ,      setActiveQ]      = useState({});
+  const [activeTour,   setActiveTour]   = useState("all");
+  const tournaments = getTeamTournaments(data, club.id, team.id);
+  const allMatches  = data.matches.filter(m=>m.teamId===team.id&&m.clubId===club.id);
+  const matches     = activeTour==="all" ? allMatches : allMatches.filter(m=>m.tournamentId===activeTour);
+
+  const assignTournament = (matchId, tourId) => {
+    const updated = data.matches.map(m=>m.id===matchId?{...m,tournamentId:tourId||null}:m);
+    onUpdateData({...data, matches:updated});
+  };
+
+  const toggle = id => setOpenMatch(prev=>prev===id?null:id);
+  const toggleTimeline = id => setOpenTimeline(prev=>({...prev,[id]:!prev[id]}));
+  const getQ = id => activeQ[id]||"todo";
+  const setQ = (id,q) => setActiveQ(prev=>({...prev,[id]:q}));
+
+  if (matches.length===0) {
+    return (
+      <div style={{padding:sz(24),maxWidth:600,margin:"0 auto"}}>
+        <Header title="Historial" onBack={onBack}/>
+        <p style={{color:p.mutedLo,textAlign:"center",padding:""+sz(48)+"px 0"}}>No hay partidos registrados.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{padding:sz(24),maxWidth:600,margin:"0 auto"}}>
+      <Header title="Historial de Partidos" onBack={onBack}/>
+      <div style={{color:p.muted,fontSize:sz(12),marginBottom:sz(10)}}>{club.name} &middot; {team.name} &middot; {allMatches.length} partido{allMatches.length!==1?"s":""}</div>
+      {tournaments.length>0 && (
+        <div style={{display:"flex",gap:sz(4),marginBottom:sz(12),overflowX:"auto",paddingBottom:2}}>
+          {[{id:"all",name:"Todos"},...tournaments].map(tr=>(
+            <button key={tr.id} onClick={()=>setActiveTour(tr.id)}
+              style={{background:activeTour===tr.id?"#A78BFA33":"transparent",border:"1px solid "+(activeTour===tr.id?"#A78BFA60":p.border),borderRadius:sz(20),padding:""+sz(5)+"px "+sz(12)+"px",cursor:"pointer",fontWeight:700,fontSize:sz(11),color:activeTour===tr.id?"#A78BFA":p.mutedLo,whiteSpace:"nowrap",flexShrink:0}}>
+              {tr.name}
+            </button>
+          ))}
+        </div>
+      )}
+      <div style={{marginBottom:sz(16),background:p.card,border:"1px solid "+p.border,borderRadius:sz(10),padding:sz(12)}}>
+        <div style={{color:p.mutedHi,fontSize:sz(11),fontWeight:700,marginBottom:sz(6)}}>URL DEL SCRIPT DE GOOGLE SHEETS</div>
+        <input
+          value={sheetsUrl} onChange={e=>onSheetsUrlChange(e.target.value)}
+          placeholder="Pegá acá la URL del Apps Script..."
+          style={{background:p.cardAlt,border:"1px solid "+p.border,borderRadius:sz(8),color:p.text,padding:""+sz(8)+"px "+sz(10)+"px",fontSize:sz(12),outline:"none",width:"100%",boxSizing:"border-box"}}
+        />
+        {sheetsUrl && <div style={{color:"#00C896",fontSize:sz(10),marginTop:sz(4)}}>✓ URL configurada</div>}
+      </div>
+
+      <div style={{display:"flex",flexDirection:"column",gap:sz(8)}}>
+        {matches.map(match=>{
+          const evs    = match.events||[];
+          const og     = evs.filter(e=>e.type==="gol"&&e.side==="own").length;
+          const rg     = evs.filter(e=>e.type==="gol"&&e.side==="rival").length;
+          const result = og>rg?"G":og===rg?"E":"P";
+          const rc     = result==="G"?ac:result==="E"?"#FBBF24":"#EF4444";
+          const isOpen = openMatch===match.id;
+          const showTL = !!openTimeline[match.id];
+          const q      = getQ(match.id);
+          const tlEvs  = q==="todo"?evs:evs.filter(e=>e.quarter===PERIODS[parseInt(q[1])-1]);
+
+          // totals helper
+          const own   = type => evs.filter(e=>e.type===type&&e.side==="own").length;
+          const rival = type => evs.filter(e=>e.type===type&&e.side==="rival").length;
+          const hasCards = own("tarjeta_verde")+own("tarjeta_amarilla")+own("tarjeta_roja")>0;
+
+          return (
+            <div key={match.id} style={{borderRadius:sz(14),overflow:"hidden",border:"1px solid "+(isOpen?ac+"50":p.border)}}>
+
+              {/* Fila principal */}
+              <div style={{background:isOpen?p.hover:p.card,padding:""+sz(13)+"px "+sz(16)+"px",display:"flex",alignItems:"center",gap:sz(12)}}>
+                <div style={{width:sz(36),height:sz(36),borderRadius:sz(8),background:rc+"22",border:"1px solid "+rc+"44",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:sz(16),color:rc,flexShrink:0}}>{result}</div>
+                <div style={{flex:1}}>
+                  <div style={{fontWeight:700,color:p.text,fontSize:sz(15)}}>{og} - {rg} &middot; {match.rival}</div>
+                  <div style={{display:"flex",alignItems:"center",gap:sz(6),marginTop:sz(2),flexWrap:"wrap"}}>
+                    <span style={{color:p.muted,fontSize:sz(12)}}>{match.date}</span>
+                    {tournaments.length>0 && (
+                      <select value={match.tournamentId||""} onChange={e=>assignTournament(match.id,e.target.value)}
+                        style={{background:p.cardAlt,border:"1px solid "+p.border,borderRadius:sz(6),color:match.tournamentId?"#A78BFA":p.mutedLo,fontSize:sz(11),padding:"1px "+sz(4)+"px",cursor:"pointer",outline:"none"}}>
+                        <option value="">Sin torneo</option>
+                        {tournaments.map(tr=><option key={tr.id} value={tr.id}>{tr.name}</option>)}
+                      </select>
+                    )}
+                  </div>
+                </div>
+                <div style={{display:"flex",gap:sz(6),alignItems:"center"}}>
+                  <button onClick={()=>toggle(match.id)}
+                    style={{background:isOpen?ac+"22":p.border,border:"1px solid "+(isOpen?ac+"60":p.borderSt),color:isOpen?ac:p.mutedHi,borderRadius:sz(8),padding:""+sz(6)+"px "+sz(10)+"px",cursor:"pointer",fontSize:sz(12),fontWeight:700,display:"flex",alignItems:"center",gap:sz(4)}}>
+                    <SvgIcon id="stats" size={sz(13)} color={isOpen?ac:p.mutedHi}/>
+                    Stats
+                  </button>
+                  {(()=>{
+                    const st = syncStatus[match.id];
+                    const syncColor = st==="ok"?"#00C896":st==="error"?"#EF4444":st==="syncing"?"#FBBF24":"#A78BFA";
+                    const syncLabel = st==="ok"?"Sincronizado":st==="error"?"Error":st==="syncing"?"...":"Sheets";
+                    return (
+                      <button onClick={()=>syncMatch(match)}
+                        style={{background:syncColor+"22",border:"1px solid "+syncColor+"60",color:syncColor,borderRadius:sz(8),padding:""+sz(6)+"px "+sz(10)+"px",cursor:"pointer",fontSize:sz(12),fontWeight:700,display:"flex",alignItems:"center",gap:sz(4),flexShrink:0}}>
+                        <svg width={sz(13)} height={sz(13)} viewBox="0 0 24 24" fill="none"><path d="M4 12a8 8 0 018-8 8 8 0 016.93 4M20 12a8 8 0 01-8 8 8 8 0 01-6.93-4" stroke={syncColor} strokeWidth="2" strokeLinecap="round"/><path d="M15 4l2.5 2.5L15 9M9 20l-2.5-2.5L9 15" stroke={syncColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                        {syncLabel}
+                      </button>
+                    );
+                  })()}
+                  <button onClick={()=>onDeleteMatch(match.id)}
+                    style={{background:"#EF444420",border:"1px solid #EF444440",borderRadius:sz(8),width:sz(32),height:sz(32),cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                    <svg width={sz(14)} height={sz(14)} viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke="#EF4444" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  </button>
+                </div>
+              </div>
+
+              {/* Desplegable */}
+              {isOpen && (
+                <div style={{background:p.cardAlt,borderTop:"1px solid "+p.border}}>
+
+                  {/* Filtro cuarto — arriba del todo, filtra tabla y cronologia */}
+                  <div style={{padding:""+sz(10)+"px "+sz(12)+"px "+sz(6)+"px"}}>
+                    <div style={{display:"flex",gap:sz(4),background:p.tab,borderRadius:sz(9),padding:3}}>
+                      {["todo","C1","C2","C3","C4"].map(opt=>(
+                        <button key={opt} onClick={()=>setQ(match.id,opt)}
+                          style={{flex:1,padding:""+sz(6)+"px "+sz(4)+"px",borderRadius:sz(7),border:"none",cursor:"pointer",fontWeight:700,fontSize:sz(11),background:q===opt?ac+"33":"transparent",color:q===opt?ac:p.mutedLo}}>
+                          {opt==="todo"?"Todo":opt}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Tabla de totales filtrados */}
+                  <div style={{padding:""+sz(4)+"px "+sz(16)+"px "+sz(10)+"px"}}>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 48px 48px",marginBottom:sz(6)}}>
+                      <span style={{color:p.mutedLo,fontSize:sz(10),fontWeight:700}}>ACCION</span>
+                      <span style={{color:ac,fontSize:sz(10),fontWeight:700,textAlign:"center"}}>NUESTRO</span>
+                      <span style={{color:"#EF4444",fontSize:sz(10),fontWeight:700,textAlign:"center"}}>RIVAL</span>
+                    </div>
+                    {[
+                      {label:"Ingresos", id:"ingreso_area"},
+                      {label:"Tiros",    id:"tiro_arco"},
+                      {label:"Corners",  id:"corner"},
+                      {label:"Goles",    id:"gol"},
+                    ].map(row=>{
+                      const o = tlEvs.filter(e=>e.type===row.id&&e.side==="own").length;
+                      const r = tlEvs.filter(e=>e.type===row.id&&e.side==="rival").length;
+                      return (
+                        <div key={row.id} style={{display:"grid",gridTemplateColumns:"1fr 48px 48px",padding:""+sz(8)+"px 0",borderBottom:"1px solid "+p.tab}}>
+                          <span style={{display:"flex",alignItems:"center",gap:sz(7)}}>
+                            <SvgIcon id={row.id} size={sz(13)} color={p.mutedHi}/>
+                            <span style={{color:p.mutedHi,fontSize:sz(13)}}>{row.label}</span>
+                          </span>
+                          <span style={{textAlign:"center",fontWeight:800,fontSize:sz(16),color:o>r?ac:o===0?p.border:p.text}}>{o}</span>
+                          <span style={{textAlign:"center",fontWeight:800,fontSize:sz(16),color:r>o?"#EF4444":r===0?p.border:p.text}}>{r}</span>
+                        </div>
+                      );
+                    })}
+
+                    {/* Tarjetas si las hay en el periodo filtrado */}
+                    {(()=>{
+                      const cards = [["tarjeta_verde","#22C55E","TV"],["tarjeta_amarilla","#EAB308","TA"],["tarjeta_roja","#EF4444","TR"]].filter(([tid])=>tlEvs.filter(e=>e.type===tid&&e.side==="own").length>0);
+                      if (!cards.length) return null;
+                      return (
+                        <div style={{display:"flex",gap:sz(8),marginTop:sz(10)}}>
+                          {cards.map(([tid,col,lbl])=>{
+                            const cnt = tlEvs.filter(e=>e.type===tid&&e.side==="own").length;
+                            return (
+                              <div key={tid} style={{display:"flex",alignItems:"center",gap:sz(5),background:col+"18",border:"1px solid "+col+"44",borderRadius:sz(20),padding:""+sz(4)+"px "+sz(10)+"px"}}>
+                                <SvgIcon id={tid} size={sz(12)} color={col}/>
+                                <span style={{color:col,fontWeight:700,fontSize:sz(12)}}>{cnt} {lbl}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Boton cronologia */}
+                  <div style={{borderTop:"1px solid "+p.border}}>
+                    <button onClick={()=>toggleTimeline(match.id)}
+                      style={{width:"100%",background:"none",border:"none",padding:""+sz(10)+"px "+sz(16)+"px",display:"flex",alignItems:"center",gap:sz(8),cursor:"pointer"}}>
+                      <SvgIcon id="history" size={sz(14)} color={showTL?ac:p.mutedLo}/>
+                      <span style={{flex:1,color:showTL?ac:p.mutedLo,fontSize:sz(12),fontWeight:700,textAlign:"left"}}>Cronologia ({tlEvs.length} eventos)</span>
+                      <span style={{color:showTL?ac:p.borderSt,fontSize:sz(16),display:"inline-block",transform:showTL?"rotate(90deg)":"rotate(0deg)",transition:"transform 0.2s"}}>&#8250;</span>
+                    </button>
+
+                    {showTL && (
+                      tlEvs.length===0
+                        ? <div style={{color:p.mutedLo,fontSize:sz(12),padding:""+sz(10)+"px "+sz(16)+"px",textAlign:"center"}}>Sin eventos en este cuarto</div>
+                        : tlEvs.map((ev,i)=>{
+                            const et = EVENT_TYPES.find(e=>e.id===ev.type);
+                            return (
+                              <div key={ev.id} style={{padding:""+sz(9)+"px "+sz(16)+"px",display:"flex",alignItems:"center",gap:sz(10),borderTop:"1px solid "+p.tab,background:i%2===0?"transparent":p.card+"60"}}>
+                                <SvgIcon id={ev.type} size={sz(14)} color={et?.color||ac}/>
+                                <span style={{color:p.textSub,fontSize:sz(12),flex:1}}>
+                                  {et?.label}
+                                  {ev.ingressLabel&&" / "+ev.ingressLabel}
+                                  {ev.golLabel&&" / "+ev.golLabel}
+                                  {ev.shotLabel&&" / "+ev.shotLabel}
+                                </span>
+                                <span style={{color:ev.side==="own"?ac:"#EF4444",fontSize:sz(11),fontWeight:700,marginRight:sz(6)}}>{ev.side==="own"?"FAV":"CON"}</span>
+                                <span style={{color:p.mutedLo,fontSize:sz(11),flexShrink:0}}>{ev.minute}' C{PERIODS.indexOf(ev.quarter)+1}</span>
+                              </div>
+                            );
+                          })
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function StatsView({data, club, team, onBack, sheetsUrl, syncAll}) {
+  const {p, ac, fs} = useTheme();
+  const sz = n => Math.round(n*fs);
+  const matches = data.matches.filter(m=>m.teamId===team.id&&m.clubId===club.id);
+  const n = matches.length;
+  const [tab, setTab] = useState("ofensivo");
+
+  if (n===0) {
+    return (
+      <div style={{padding:sz(24),maxWidth:600,margin:"0 auto"}}>
+        <Header title="Estadisticas Generales" onBack={onBack}/>
+        <p style={{color:p.mutedLo,textAlign:"center",padding:""+sz(48)+"px 0"}}>No hay partidos registrados.</p>
+      </div>
+    );
+  }
+
+  const allEvs = matches.flatMap(m=>m.events||[]);
+  const count  = (type,side) => allEvs.filter(e=>e.type===type&&(!side||e.side===side)).length;
+  const avg    = v => (v/n).toFixed(1);
+  const pct    = (num,den) => den===0?"--":Math.round((num/den)*100)+"%";
+
+  const ownGoals=count("gol","own"), rivalGoals=count("gol","rival");
+  const ownIng=count("ingreso_area","own"), rivalIng=count("ingreso_area","rival");
+  const ownTiros=count("tiro_arco","own"), rivalTiros=count("tiro_arco","rival");
+  const ownCorn=count("corner","own"), rivalCorn=count("corner","rival");
+
+  const wins   = matches.filter(m=>{const og=(m.events||[]).filter(e=>e.type==="gol"&&e.side==="own").length,rg=(m.events||[]).filter(e=>e.type==="gol"&&e.side==="rival").length;return og>rg;}).length;
+  const draws  = matches.filter(m=>{const og=(m.events||[]).filter(e=>e.type==="gol"&&e.side==="own").length,rg=(m.events||[]).filter(e=>e.type==="gol"&&e.side==="rival").length;return og===rg;}).length;
+  const losses = n-wins-draws;
+
+  const cleanSheets  = matches.filter(m=>(m.events||[]).filter(e=>e.type==="gol"&&e.side==="rival").length===0).length;
+  const matchesWGoal = matches.filter(m=>(m.events||[]).some(e=>e.type==="gol"&&e.side==="own")).length;
+
+  const oGJ=allEvs.filter(e=>e.type==="gol"&&e.side==="own"&&e.golType==="jugada").length;
+  const oGC=allEvs.filter(e=>e.type==="gol"&&e.side==="own"&&e.golType==="corner").length;
+  const oGP=allEvs.filter(e=>e.type==="gol"&&e.side==="own"&&e.golType==="penal").length;
+  const rGC=allEvs.filter(e=>e.type==="gol"&&e.side==="rival"&&e.golType==="corner").length;
+
+  const oSJ=allEvs.filter(e=>e.type==="tiro_arco"&&e.side==="own"&&e.shotType==="jugada").length;
+  const oSC=allEvs.filter(e=>e.type==="tiro_arco"&&e.side==="own"&&e.shotType==="corner").length;
+  const oSR=allEvs.filter(e=>e.type==="tiro_arco"&&e.side==="own"&&e.shotType==="rebote").length;
+  const oSD=allEvs.filter(e=>e.type==="tiro_arco"&&e.side==="own"&&e.shotType==="desvio").length;
+  const oSU=ownTiros-oSJ-oSC-oSR-oSD;
+  const oGU=ownGoals-oGJ-oGC-oGP;
+
+  const ingrTotals = INGRESS_TYPES.map(it=>({...it, own:allEvs.filter(e=>e.type==="ingreso_area"&&e.side==="own"&&e.ingressType===it.id).length, rival:allEvs.filter(e=>e.type==="ingreso_area"&&e.side==="rival"&&e.ingressType===it.id).length}));
+  const byQ = PERIODS.map((q,qi)=>({q,short:"C"+(qi+1), goals:allEvs.filter(e=>e.type==="gol"&&e.side==="own"&&e.quarter===q).length, ing:allEvs.filter(e=>e.type==="ingreso_area"&&e.side==="own"&&e.quarter===q).length, ga:allEvs.filter(e=>e.type==="gol"&&e.side==="rival"&&e.quarter===q).length, ia:allEvs.filter(e=>e.type==="ingreso_area"&&e.side==="rival"&&e.quarter===q).length}));
+  const bestQ  = [...byQ].sort((a,b)=>b.goals-a.goals)[0];
+  const worstQ = [...byQ].sort((a,b)=>b.ga-a.ga)[0];
+
+  const BarRows = ({rows, total_}) => (
+    <div>
+      <div style={{display:"flex",height:sz(20),borderRadius:sz(8),overflow:"hidden",marginBottom:sz(16),gap:3}}>
+        {rows.filter(r=>r.v>0).map(r=><div key={r.l} style={{flex:r.v,background:r.c,borderRadius:sz(4)}}/>)}
+      </div>
+      {rows.map(r=>(
+        <div key={r.l} style={{display:"flex",alignItems:"center",gap:sz(10),marginBottom:sz(6)}}>
+          <div style={{width:sz(10),height:sz(10),borderRadius:sz(2),background:r.c,flexShrink:0}}/>
+          <span style={{color:p.mutedHi,fontSize:sz(13),flex:1}}>{r.l}</span>
+          <span style={{color:p.text,fontWeight:800,fontSize:sz(15)}}>{r.v}</span>
+          <span style={{color:p.mutedLo,fontSize:sz(12),minWidth:sz(38),textAlign:"right"}}>{pct(r.v,total_)}</span>
+        </div>
+      ))}
+    </div>
+  );
+
+  const EfRow = ({label, value, invert, last}) => {
+    const num = value==="--"?0:parseInt(value);
+    const barColor = invert ? (num>=50?"#EF4444":num>=25?"#FBBF24":ac) : (num>=50?ac:num>=25?"#FBBF24":"#3B9EFF");
+    return (
+      <div style={{padding:""+sz(10)+"px "+sz(16)+"px",borderBottom:last?"none":"1px solid "+p.tab,display:"flex",alignItems:"center",gap:sz(10)}}>
+        <span style={{color:p.mutedHi,fontSize:sz(13),flex:1}}>{label}</span>
+        <div style={{width:sz(80),height:sz(5),borderRadius:sz(3),background:p.border,overflow:"hidden",marginRight:sz(8)}}>
+          {value!=="--"&&<div style={{width:Math.min(num,100)+"%",height:"100%",background:barColor,borderRadius:sz(3)}}/>}
+        </div>
+        <span style={{color:p.text,fontWeight:800,fontSize:sz(14),minWidth:sz(36),textAlign:"right"}}>{value}</span>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{padding:sz(24),maxWidth:640,margin:"0 auto"}}>
+      <Header title="Estadisticas Generales" onBack={onBack}/>
+      <div style={{color:p.muted,fontSize:sz(12),marginBottom:sz(12)}}>{club.name} &middot; {team.name} &middot; {n} partido{n!==1?"s":""}</div>
+      {sheetsUrl && (
+        <button onClick={()=>syncAll(matches, club, team)}
+          style={{width:"100%",background:"#A78BFA22",border:"1px solid #A78BFA60",borderRadius:sz(12),padding:sz(12),marginBottom:sz(16),color:"#A78BFA",fontWeight:700,fontSize:sz(14),cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:sz(8)}}>
+          <svg width={sz(16)} height={sz(16)} viewBox="0 0 24 24" fill="none"><path d="M4 12a8 8 0 018-8 8 8 0 016.93 4M20 12a8 8 0 01-8 8 8 8 0 01-6.93-4" stroke="#A78BFA" strokeWidth="2" strokeLinecap="round"/><path d="M15 4l2.5 2.5L15 9M9 20l-2.5-2.5L9 15" stroke="#A78BFA" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          Sincronizar todos los partidos con Google Sheets
+        </button>
+      )}
+
+      <div style={{display:"flex",gap:6,marginBottom:sz(24),background:p.tab,borderRadius:sz(10),padding:4}}>
+        {[["ofensivo","Ofensivo"],["defensivo","Defensivo"],["general","General"]].map(([tid,tlbl])=>(
+          <button key={tid} onClick={()=>setTab(tid)} style={{flex:1,padding:""+sz(9)+"px "+sz(4)+"px",borderRadius:sz(8),border:"none",cursor:"pointer",fontWeight:700,fontSize:sz(13),background:tab===tid?ac+"33":"transparent",color:tab===tid?p.text:p.mutedLo}}>
+            {tlbl}
+          </button>
+        ))}
+      </div>
+
+      {tab==="ofensivo" && (
+        <div>
+          <div style={{color:p.mutedHi,fontSize:sz(12),fontWeight:700,marginBottom:sz(10)}}>GOLES A FAVOR</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:sz(8),marginBottom:sz(8)}}>
+            <StatCard value={ownGoals}     label="Total"            color={ac}      sub={"Prom. "+avg(ownGoals)+"/partido"}/>
+            <StatCard value={matchesWGoal} label="Partidos con gol" color="#3B9EFF" sub={"de "+n+" partidos"}/>
+          </div>
+          <div style={{marginBottom:sz(12)}}><RelBar left={ownGoals} right={rivalGoals} leftColor={ac} rightColor="#EF4444"/></div>
+          {ownGoals>0 && (
+            <div style={{background:p.card,border:"1px solid "+p.border,borderRadius:sz(12),padding:""+sz(14)+"px "+sz(16)+"px",marginBottom:sz(24)}}>
+              <div style={{color:p.mutedLo,fontSize:sz(11),fontWeight:700,marginBottom:sz(12)}}>ORIGEN DE LOS GOLES</div>
+              <BarRows rows={[{l:"Jugada",v:oGJ,c:"#A78BFA"},{l:"Corner",v:oGC,c:"#FBBF24"},{l:"Penal",v:oGP,c:"#F97316"},...(oGU>0?[{l:"Sin clasif.",v:oGU,c:p.borderSt}]:[])] } total_={ownGoals}/>
+            </div>
+          )}
+
+          <div style={{color:p.mutedHi,fontSize:sz(12),fontWeight:700,marginBottom:sz(10)}}>VOLUMEN DE ATAQUE</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:sz(8),marginBottom:sz(16)}}>
+            <StatCard value={ownIng}   label="Ingresos" color="#3B9EFF" sub={avg(ownIng)+"/partido"}/>
+            <StatCard value={ownTiros} label="Tiros"    color="#A78BFA" sub={avg(ownTiros)+"/partido"}/>
+            <StatCard value={ownCorn}  label="Corners"  color="#FBBF24" sub={avg(ownCorn)+"/partido"}/>
+          </div>
+          <div style={{background:p.card,border:"1px solid "+p.border,borderRadius:sz(12),overflow:"hidden",marginBottom:sz(24)}}>
+            <div style={{padding:""+sz(9)+"px "+sz(16)+"px",background:p.tab,borderBottom:"1px solid "+p.border}}><span style={{color:p.mutedLo,fontSize:sz(11),fontWeight:700}}>EFICIENCIA OFENSIVA</span></div>
+            <EfRow label="Ingresos a Tiro"   value={pct(ownTiros,ownIng)}/>
+            <EfRow label="Ingresos a Corner" value={pct(ownCorn,ownIng)}/>
+            <EfRow label="Tiros a Gol"       value={pct(ownGoals,ownTiros)}/>
+            <EfRow label="Corners a Gol"     value={pct(oGC,ownCorn)} last={true}/>
+          </div>
+          {ownTiros>0 && (
+            <div style={{background:p.card,border:"1px solid "+p.border,borderRadius:sz(12),padding:""+sz(14)+"px "+sz(16)+"px",marginBottom:sz(24)}}>
+              <div style={{color:p.mutedLo,fontSize:sz(11),fontWeight:700,marginBottom:sz(12)}}>ORIGEN DE LOS TIROS</div>
+              <BarRows rows={[{l:"Jugada",v:oSJ,c:"#A78BFA"},{l:"Corner",v:oSC,c:"#FBBF24"},{l:"Rebote",v:oSR,c:"#3B9EFF"},{l:"Desvio",v:oSD,c:ac},...(oSU>0?[{l:"Sin clasif.",v:oSU,c:p.borderSt}]:[])] } total_={ownTiros}/>
+            </div>
+          )}
+
+          <div style={{color:p.mutedHi,fontSize:sz(12),fontWeight:700,marginBottom:sz(10)}}>TIPOS DE INGRESO (PROPIO)</div>
+          <div style={{background:p.card,border:"1px solid "+p.border,borderRadius:sz(12),overflow:"hidden",marginBottom:sz(24)}}>
+            {ingrTotals.map((it,i)=>(
+              <div key={it.id} style={{display:"grid",gridTemplateColumns:"1fr 60px",padding:""+sz(9)+"px "+sz(14)+"px",borderBottom:i<ingrTotals.length-1?"1px solid "+p.tab:"none",background:i%2===0?"transparent":p.cardAlt}}>
+                <span style={{display:"flex",alignItems:"center",gap:sz(6)}}><EventIcon id={it.id} size={sz(14)} color="#3B9EFF"/><span style={{color:p.mutedHi,fontSize:sz(12)}}>{it.label}</span></span>
+                <span style={{textAlign:"center",fontWeight:700,fontSize:sz(16),color:it.own===0?p.border:"#3B9EFF"}}>{it.own}</span>
+              </div>
+            ))}
+          </div>
+
+          <div style={{color:p.mutedHi,fontSize:sz(12),fontWeight:700,marginBottom:sz(10)}}>POR CUARTO (ATAQUE)</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:sz(8)}}>
+            {byQ.map(q=>{
+              const isBest = q.q===bestQ.q;
+              return (
+                <div key={q.q} style={{background:isBest?ac+"15":p.card,border:"1px solid "+(isBest?ac+"40":p.border),borderRadius:sz(12),padding:""+sz(12)+"px "+sz(8)+"px",textAlign:"center"}}>
+                  <div style={{color:p.mutedLo,fontSize:sz(11),fontWeight:700,marginBottom:sz(6)}}>{q.short}</div>
+                  <div style={{color:ac,fontWeight:900,fontSize:sz(22)}}>{q.goals}</div>
+                  <div style={{color:p.mutedLo,fontSize:sz(10)}}>goles</div>
+                  <div style={{color:"#3B9EFF",fontWeight:700,fontSize:sz(14),marginTop:sz(4)}}>{q.ing}</div>
+                  <div style={{color:p.borderSt,fontSize:sz(10)}}>ingresos</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {tab==="defensivo" && (
+        <div>
+          <div style={{color:p.mutedHi,fontSize:sz(12),fontWeight:700,marginBottom:sz(10)}}>GOLES RECIBIDOS</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:sz(8),marginBottom:sz(8)}}>
+            <StatCard value={rivalGoals}  label="Total recibidos" color="#EF4444" sub={"Prom. "+avg(rivalGoals)+"/partido"}/>
+            <StatCard value={cleanSheets} label="Vallas invictas"  color={ac}     sub={"de "+n+" partidos"}/>
+          </div>
+          <div style={{marginBottom:sz(24)}}><RelBar left={rivalGoals} right={ownGoals} leftColor="#EF4444" rightColor={ac}/></div>
+
+          <div style={{color:p.mutedHi,fontSize:sz(12),fontWeight:700,marginBottom:sz(10)}}>VOLUMEN DEFENSIVO</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:sz(8),marginBottom:sz(16)}}>
+            <StatCard value={rivalIng}   label="Ingresos rival" color="#EF4444" sub={avg(rivalIng)+"/partido"}/>
+            <StatCard value={rivalTiros} label="Tiros rival"    color="#F97316" sub={avg(rivalTiros)+"/partido"}/>
+            <StatCard value={rivalCorn}  label="Corners rival"  color="#EAB308" sub={avg(rivalCorn)+"/partido"}/>
+          </div>
+          <div style={{background:p.card,border:"1px solid "+p.border,borderRadius:sz(12),overflow:"hidden",marginBottom:sz(24)}}>
+            <div style={{padding:""+sz(9)+"px "+sz(16)+"px",background:p.tab,borderBottom:"1px solid "+p.border}}><span style={{color:p.mutedLo,fontSize:sz(11),fontWeight:700}}>EFICIENCIA RIVAL</span></div>
+            <EfRow label="Ingresos a Tiro"   value={pct(rivalTiros,rivalIng)}   invert={true}/>
+            <EfRow label="Ingresos a Corner" value={pct(rivalCorn,rivalIng)}    invert={true}/>
+            <EfRow label="Tiros a Gol"       value={pct(rivalGoals,rivalTiros)} invert={true}/>
+            <EfRow label="Corners a Gol"     value={pct(rGC,rivalCorn)}         invert={true} last={true}/>
+          </div>
+
+          <div style={{color:p.mutedHi,fontSize:sz(12),fontWeight:700,marginBottom:sz(10)}}>TIPOS DE INGRESO (RIVAL)</div>
+          <div style={{background:p.card,border:"1px solid "+p.border,borderRadius:sz(12),overflow:"hidden",marginBottom:sz(24)}}>
+            {ingrTotals.map((it,i)=>(
+              <div key={it.id} style={{display:"grid",gridTemplateColumns:"1fr 60px",padding:""+sz(9)+"px "+sz(14)+"px",borderBottom:i<ingrTotals.length-1?"1px solid "+p.tab:"none",background:i%2===0?"transparent":p.cardAlt}}>
+                <span style={{display:"flex",alignItems:"center",gap:sz(6)}}><EventIcon id={it.id} size={sz(14)} color="#EF4444"/><span style={{color:p.mutedHi,fontSize:sz(12)}}>{it.label}</span></span>
+                <span style={{textAlign:"center",fontWeight:700,fontSize:sz(16),color:it.rival===0?p.border:"#EF4444"}}>{it.rival}</span>
+              </div>
+            ))}
+          </div>
+
+          <div style={{color:p.mutedHi,fontSize:sz(12),fontWeight:700,marginBottom:sz(10)}}>POR CUARTO (DEFENSA)</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:sz(8)}}>
+            {byQ.map(q=>{
+              const isWorst = q.q===worstQ.q&&q.ga>0;
+              return (
+                <div key={q.q} style={{background:isWorst?"#EF444415":p.card,border:"1px solid "+(isWorst?"#EF444440":p.border),borderRadius:sz(12),padding:""+sz(12)+"px "+sz(8)+"px",textAlign:"center"}}>
+                  <div style={{color:p.mutedLo,fontSize:sz(11),fontWeight:700,marginBottom:sz(6)}}>{q.short}</div>
+                  <div style={{color:"#EF4444",fontWeight:900,fontSize:sz(22)}}>{q.ga}</div>
+                  <div style={{color:p.mutedLo,fontSize:sz(10)}}>recibidos</div>
+                  <div style={{color:"#F97316",fontWeight:700,fontSize:sz(14),marginTop:sz(4)}}>{q.ia}</div>
+                  <div style={{color:p.borderSt,fontSize:sz(10)}}>ingresos</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {tab==="general" && (
+        <div>
+          <div style={{color:p.mutedHi,fontSize:sz(12),fontWeight:700,marginBottom:sz(10)}}>RESULTADOS</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:sz(8),marginBottom:sz(24)}}>
+            <StatCard value={wins}   label="Ganados"   color={ac}/>
+            <StatCard value={draws}  label="Empatados" color="#FBBF24"/>
+            <StatCard value={losses} label="Perdidos"  color="#EF4444"/>
+          </div>
+
+          <div style={{color:p.mutedHi,fontSize:sz(12),fontWeight:700,marginBottom:sz(10)}}>COMPARATIVA VS RIVAL</div>
+          <div style={{background:p.card,border:"1px solid "+p.border,borderRadius:sz(12),overflow:"hidden",marginBottom:sz(24)}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 60px 60px",padding:""+sz(9)+"px "+sz(14)+"px",background:p.tab,borderBottom:"1px solid "+p.border}}>
+              <span style={{color:p.mutedLo,fontSize:sz(11),fontWeight:700}}>ACCION</span>
+              <span style={{color:ac,fontSize:sz(11),fontWeight:700,textAlign:"center"}}>{team.name.length>8?team.name.slice(0,7)+"...":team.name}</span>
+              <span style={{color:"#EF4444",fontSize:sz(11),fontWeight:700,textAlign:"center"}}>Rival</span>
+            </div>
+            {[{label:"Ingresos",id:"ingreso_area",own:ownIng,rival:rivalIng},{label:"Tiros",id:"tiro_arco",own:ownTiros,rival:rivalTiros},{label:"Corners",id:"corner",own:ownCorn,rival:rivalCorn},{label:"Goles",id:"gol",own:ownGoals,rival:rivalGoals}].map((row,i)=>(
+              <div key={row.label} style={{display:"grid",gridTemplateColumns:"1fr 60px 60px",padding:""+sz(9)+"px "+sz(14)+"px",borderBottom:i<3?"1px solid "+p.tab:"none",background:i%2===0?"transparent":p.cardAlt}}>
+                <span style={{display:"flex",alignItems:"center",gap:sz(6)}}><EventIcon id={row.id} size={sz(14)} color={p.mutedHi}/><span style={{color:p.mutedHi,fontSize:sz(12)}}>{row.label}</span></span>
+                <span style={{textAlign:"center",fontWeight:800,fontSize:sz(16),color:row.own>row.rival?ac:row.own===0?p.border:p.text}}>{row.own}</span>
+                <span style={{textAlign:"center",fontWeight:800,fontSize:sz(16),color:row.rival>row.own?"#EF4444":row.rival===0?p.border:p.text}}>{row.rival}</span>
+              </div>
+            ))}
+          </div>
+
+          <div style={{color:p.mutedHi,fontSize:sz(12),fontWeight:700,marginBottom:sz(10)}}>DISCIPLINA</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:sz(8)}}>
+            <StatCard value={count("tarjeta_verde","own")}    label="T. Verdes"    color="#22C55E" sub={avg(count("tarjeta_verde","own"))+"/partido"}/>
+            <StatCard value={count("tarjeta_amarilla","own")} label="T. Amarillas" color="#EAB308" sub={avg(count("tarjeta_amarilla","own"))+"/partido"}/>
+            <StatCard value={count("tarjeta_roja","own")}     label="T. Rojas"     color="#EF4444" sub={avg(count("tarjeta_roja","own"))+"/partido"}/>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BackupPanel({onExport, onImport, onClose}) {
+  const {p, ac, fs} = useTheme();
+  const sz = n => Math.round(n*fs);
+  const fileRef = React.useRef();
+  return (
+    <div onClick={onClose} style={{position:"fixed",inset:0,zIndex:1000,display:"flex",alignItems:"flex-end",justifyContent:"center",background:"rgba(0,0,0,0.6)"}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:p.card,border:"1px solid "+p.border,borderRadius:"20px 20px 0 0",padding:24,width:"100%",maxWidth:600}}>
+        <div style={{width:40,height:4,borderRadius:2,background:p.borderSt,margin:"0 auto 20px"}}/>
+        <div style={{fontWeight:800,fontSize:sz(18),color:p.text,marginBottom:8}}>Backup de datos</div>
+        <div style={{color:p.muted,fontSize:sz(13),marginBottom:24}}>Exporta todos tus clubes, equipos y partidos a un archivo JSON. Guarda el archivo en un lugar seguro para no perder tus datos.</div>
+
+        <div style={{display:"flex",flexDirection:"column",gap:sz(12)}}>
+          <button onClick={onExport} style={{background:ac,border:"none",borderRadius:sz(12),padding:sz(16),color:"#fff",fontWeight:800,fontSize:sz(15),cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:sz(10)}}>
+            <svg width={sz(20)} height={sz(20)} viewBox="0 0 24 24" fill="none"><path d="M12 3v12M8 11l4 4 4-4M3 17v2a2 2 0 002 2h14a2 2 0 002-2v-2" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            Exportar datos
+          </button>
+          <button onClick={()=>fileRef.current.click()} style={{background:p.cardAlt,border:"1px solid "+p.border,borderRadius:sz(12),padding:sz(16),color:p.text,fontWeight:700,fontSize:sz(15),cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:sz(10)}}>
+            <svg width={sz(20)} height={sz(20)} viewBox="0 0 24 24" fill="none"><path d="M12 21V9M8 13l4-4 4 4M3 17v2a2 2 0 002 2h14a2 2 0 002-2v-2" stroke={p.text} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            Importar datos
+          </button>
+          <input ref={fileRef} type="file" accept=".json" style={{display:"none"}} onChange={e=>{ if(e.target.files[0]){ onImport(e.target.files[0]); onClose(); } }}/>
+          <button onClick={onClose} style={{background:"none",border:"none",color:p.mutedLo,fontSize:sz(13),cursor:"pointer",padding:sz(8)}}>Cancelar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+function App() {
+  const [data,         setData]         = useState(()=>loadDataSync());
+  const [view,         setView]         = useState("home");
+  const [selClub,      setSelClub]      = useState(null);
+  const [selTeam,      setSelTeam]      = useState(null);
+  const [settings,     setSettings]     = useState(()=>loadSettingsSync()||DEFAULT_SETTINGS);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showBackup,   setShowBackup]   = useState(false);
+  const [sheetsUrl,    setSheetsUrl]    = useState(()=>loadSheetsUrl());
+  const [syncStatus,   setSyncStatus]   = useState({});
+  const [loaded,       setLoaded]       = useState(true);
+
+  // data loaded synchronously
+
+  const updateData = useCallback(d=>{ setData(d); saveData(d); },[]);
+  const handleSaveSettings = s => { setSettings(s); saveSettings(s); };
+  const handleSetSheetsUrl = url => { setSheetsUrl(url); saveSheetsUrl(url); };
+
+  const syncAll = async (teamMatches, clubObj, teamObj) => {
+    if (!sheetsUrl) { alert("Primero configurá la URL del Google Sheet."); return; }
+    for (const match of teamMatches) {
+      try {
+        await fetch(sheetsUrl, {
+          method:"POST", mode:"no-cors",
+          body: JSON.stringify({
+            action:"sync_match",
+            match,
+            clubName: clubObj?.name||"Club",
+            teamName: teamObj?.name||"Equipo",
+            tournamentName: (()=>{
+              const tours = getTeamTournaments(data, clubObj?.id, teamObj?.id);
+              return tours.find(t=>t.id===match.tournamentId)?.name||"";
+            })()
+          })
+        });
+      } catch(e) {}
+    }
+    alert("Sincronización completa: "+teamMatches.length+" partido"+(teamMatches.length!==1?"s":"")+" enviados.");
+  };
+
+  const syncMatch = async (match) => {
+    if (!sheetsUrl) { alert("Primero configurá la URL del Google Sheet en Ajustes de sincronización."); return; }
+    const club = data.clubs.find(c=>c.id===match.clubId);
+    const team = (club?.teams||[]).find(t=>t.id===match.teamId);
+    setSyncStatus(prev=>({...prev,[match.id]:"syncing"}));
+    try {
+      await fetch(sheetsUrl, {
+        method:"POST", mode:"no-cors",
+        body: JSON.stringify({
+          action:"sync_match",
+          match,
+          clubName: club?.name||"Club",
+          teamName: team?.name||"Equipo",
+          tournamentName: (()=>{
+            const tours = getTeamTournaments(data, club?.id, team?.id);
+            return tours.find(t=>t.id===match.tournamentId)?.name||"";
+          })()
+        })
+      });
+      setSyncStatus(prev=>({...prev,[match.id]:"ok"}));
+    } catch(e) {
+      setSyncStatus(prev=>({...prev,[match.id]:"error"}));
+      alert("Error al sincronizar. Verificá la URL del script.");
+    }
+  };
+
+  const exportData = () => {
+    const payload = { data, settings, exportedAt: new Date().toISOString(), version: 2 };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {type: 'application/json'});
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url;
+    a.download = 'live-tracker-backup-' + new Date().toLocaleDateString('es-AR').replace(/\//g,'-') + '.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importData = (file) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      try {
+        const payload = JSON.parse(e.target.result);
+        if (payload.data) {
+          updateData(payload.data);
+          if (payload.settings) { setSettings(payload.settings); saveSettings(payload.settings); }
+          alert('Datos importados correctamente.');
+        } else {
+          alert('Archivo invalido.');
+        }
+      } catch(err) { alert('Error al leer el archivo.'); }
+    };
+    reader.readAsText(file);
+  };
+  const handleSelectCtx = (club,team) => { setSelClub(club); setSelTeam(team); setView("team-context"); };
+  const deleteMatch = id => updateData({...data, matches:data.matches.filter(m=>m.id!==id)});
+
+  const p  = PALETTES[settings.palette] || PALETTES.azul;
+  const ac = ACCENTS.find(a=>a.id===settings.accent)?.hex || "#00C896";
+  const fs = FONT_SCALES[settings.fontScale] || 1;
+  const theme = {p, ac, fs, iconStyle:settings.iconStyle};
+
+  if (!loaded) {
+    return (
+      <div style={{minHeight:"100vh",background:"#020817",display:"flex",alignItems:"center",justifyContent:"center"}}>
+        <div style={{color:"#475569",fontSize:14}}>Cargando...</div>
+      </div>
+    );
+  }
+
+  return (
+    <ThemeCtx.Provider value={theme}>
+      <div style={{minHeight:"100vh",background:p.bg,fontFamily:"'DM Sans','Segoe UI',sans-serif",color:p.text,paddingBottom:40}}>
+        <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;800&amp;display=swap" rel="stylesheet"/>
+        {showSettings && <SettingsPanel settings={settings} onSave={handleSaveSettings} onClose={()=>setShowSettings(false)}/>}
+        {showBackup   && <BackupPanel onExport={()=>{exportData();setShowBackup(false);}} onImport={importData} onClose={()=>setShowBackup(false)}/>}
+        {view==="home"         && <HomeView      data={data} onUpdateData={updateData} onSelectContext={handleSelectCtx} onOpenSettings={()=>setShowSettings(true)} onOpenBackup={()=>setShowBackup(true)}/>}
+        {view==="team-context" && selClub        && <ClubTeamView data={data} onUpdateData={updateData} club={selClub} team={selTeam} onBack={()=>setView("home")} onNavigate={v=>setView(v)} onOpenSettings={()=>setShowSettings(true)} onOpenBackup={()=>setShowBackup(true)}/>}
+        {view==="new-match"    && selClub&&selTeam && <NewMatchView data={data} onUpdateData={updateData} club={selClub} team={selTeam} onBack={()=>setView("team-context")}/>}
+        {view==="history"      && selClub&&selTeam && <HistoryView  data={data} club={selClub} team={selTeam} onBack={()=>setView("team-context")} sheetsUrl={sheetsUrl} syncMatch={syncMatch} syncStatus={syncStatus} onSheetsUrlChange={handleSetSheetsUrl} onUpdateData={updateData} onDeleteMatch={deleteMatch}/>}
+        {view==="stats"        && selClub&&selTeam && <StatsView    data={data} club={selClub} team={selTeam} onBack={()=>setView("team-context")} sheetsUrl={sheetsUrl} syncAll={syncAll}/>}
+      </div>
+    </ThemeCtx.Provider>
+  );
+}
+
+
+
+const loadingEl = document.getElementById('loading');
+if (loadingEl) loadingEl.style.display = 'none';
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(React.createElement(App));
+  </script>
+  <script>
+  if ('serviceWorker' in navigator) {
+    const sw = "\nself.addEventListener('install', e => { self.skipWaiting(); });\nself.addEventListener('activate', e => { self.clients.claim(); });\nself.addEventListener('fetch', e => {\n  e.respondWith(\n    caches.match(e.request).then(cached => {\n      const fresh = fetch(e.request).then(r => {\n        if (r && r.status === 200) {\n          const clone = r.clone();\n          caches.open('live-tracker-v2').then(c => c.put(e.request, clone));\n        }\n        return r;\n      }).catch(() => cached);\n      return cached || fresh;\n    })\n  );\n});\n";
+    const blob = new Blob([sw], {type:'application/javascript'});
+    navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(()=>{});
+  }
+  </script>
+</body>
+</html>
